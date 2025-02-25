@@ -12,6 +12,7 @@ import { bridgeAction } from "./actions/bridge";
 import { stakeAction } from "./actions/stake";
 import { faucetAction } from "./actions/faucet";
 import { deployAction } from "./actions/deploy";
+import { greenfieldAction } from "./actions/gnfd";
 
 export const bnbPlugin: Plugin = {
     name: "bnb",
@@ -28,6 +29,7 @@ export const bnbPlugin: Plugin = {
         stakeAction,
         faucetAction,
         deployAction,
+        greenfieldAction,
     ],
 };
 
