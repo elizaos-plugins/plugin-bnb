@@ -35,5 +35,35 @@
     "peerDependencies": {
         "whatwg-url": "7.1.0",
         "@types/mime-types": "^2.1.4"
+        "whatwg-url": "7.1.0"
+    },
+    "agentConfig": {
+        "pluginType": "elizaos:client:1.0.0",
+        "pluginParameters": {
+            "BNB_PRIVATE_KEY": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Your private key for the BNB Chain ecosystem. Grants full access to associated funds.",
+                "optional": true
+            },
+            "BNB_PUBLIC_KEY": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Your public key for the BNB Chain ecosystem.",
+                "optional": true
+            },
+            "BSC_PROVIDER_URL": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Custom RPC URL for BSC.",
+                "optional": true
+            },
+            "OPBNB_PROVIDER_URL": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Custom RPC URL for opBNB.",
+                "optional": true
+            }
+        }
     }
 }
