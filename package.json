@@ -5,6 +5,7 @@
     "type": "module",
     "types": "dist/index.d.ts",
     "dependencies": {
+        "@bnb-chain/greenfield-js-sdk": "^2.2.0",
         "@elizaos/core": "workspace:*",
         "@lifi/data-types": "5.15.5",
         "@lifi/sdk": "3.4.1",
@@ -12,6 +13,7 @@
         "@web3-name-sdk/core": "^0.3.2",
         "@openzeppelin/contracts": "^5.1.0",
         "@types/node": "^22.10.5",
+        "mime-types": "^2.1.35",
         "solc": "^0.8.28",
         "tsup": "8.3.5",
         "viem": "2.21.53",
@@ -31,6 +33,8 @@
         "format:fix": "biome format --write ."
     },
     "peerDependencies": {
+        "whatwg-url": "7.1.0",
+        "@types/mime-types": "^2.1.4"
         "whatwg-url": "7.1.0"
     },
     "agentConfig": {
