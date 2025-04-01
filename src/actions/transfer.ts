@@ -36,16 +36,14 @@ export class TransferAction {
 
     async transfer(params: TransferParams): Promise<TransferResponse> {
         elizaLogger.debug("Transfer params:", params);
-        this.validateAndNormalizeParams(params);
+        await this.validateAndNormalizeParams(params);
         elizaLogger.debug("Normalized transfer params:", params);
 
         const fromAddress = this.walletProvider.getAddress();
 
         this.walletProvider.switchChain(params.chain);
-
         const nativeToken =
             this.walletProvider.chains[params.chain].nativeCurrency.symbol;
-
         const resp: TransferResponse = {
             chain: params.chain,
             txHash: "0x",
@@ -54,7 +52,8 @@ export class TransferAction {
             token: params.token ?? nativeToken,
         };
 
-        if (!params.token || params.token === nativeToken) {
+        if (!params.token || params.token =="null" || params.token === nativeToken) {
+            elizaLogger.debug("Native token transfer:", nativeToken);
             // Native token transfer
             const options: { gas?: bigint; gasPrice?: bigint; data?: Hex } = {
                 data: params.data,
@@ -85,6 +84,7 @@ export class TransferAction {
             );
         } else {
             // ERC20 token transfer
+            elizaLogger.debug("ERC20 token transfer");
             let tokenAddress = params.token;
             if (!params.token.startsWith("0x")) {
                 tokenAddress = await this.walletProvider.getTokenAddress(
@@ -143,6 +143,10 @@ export class TransferAction {
         params.toAddress = await this.walletProvider.formatAddress(
             params.toAddress
         );
+
+        params.data = ("null" == params.data + "") ? "0x" : params.data;
+        elizaLogger.debug("params.data" , params.data);
+
     }
 }
 
