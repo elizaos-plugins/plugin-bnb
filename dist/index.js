@@ -432,6 +432,30 @@ Respond with a JSON markdown block containing only the extracted values. Use nul
 }
 \`\`\`
 `;
+var greenfieldTemplate = `Given the recent messages and wallet information below(only including 'Greenfield' keyword):
+
+{{recentMessages}}
+
+{{walletInfo}}
+
+Extract the following details for Greenfield operations:
+- **actionType** (string): The type of operation to perform (e.g., "createBucket", "uploadObject", "deleteObject", "crossChainTransfer")
+- **bucketName** (string, optional): The name of the bucket to operate
+- **objectName** (string, optional): The name of the object for upload operations
+- **visibility** (string, optional): Bucket visibility setting ("private" or "public")
+- **amount** (string, optional): BNB transfer to greenfield token amount.
+
+Required response format:
+\`\`\`json
+{
+    "actionType": "createBucket" | "uploadObject" | "deleteObject" | "crossChainTransfer",
+    "bucketName": string,
+    "objectName": string,
+    "visibility": "private" | "public",
+    "amount": number
+}
+\`\`\`
+`;
 
 // src/actions/swap.ts
 var SwapAction = class {
@@ -607,7 +631,7 @@ var TransferAction = class {
   DEFAULT_GAS_PRICE = 3000000000n;
   async transfer(params) {
     elizaLogger2.debug("Transfer params:", params);
-    this.validateAndNormalizeParams(params);
+    await this.validateAndNormalizeParams(params);
     elizaLogger2.debug("Normalized transfer params:", params);
     const fromAddress = this.walletProvider.getAddress();
     this.walletProvider.switchChain(params.chain);
@@ -619,7 +643,8 @@ var TransferAction = class {
       amount: "",
       token: params.token ?? nativeToken
     };
-    if (!params.token || params.token === nativeToken) {
+    if (!params.token || params.token == "null" || params.token === nativeToken) {
+      elizaLogger2.debug("Native token transfer:", nativeToken);
       const options = {
         data: params.data
       };
@@ -645,6 +670,7 @@ var TransferAction = class {
         options
       );
     } else {
+      elizaLogger2.debug("ERC20 token transfer");
       let tokenAddress = params.token;
       if (!params.token.startsWith("0x")) {
         tokenAddress = await this.walletProvider.getTokenAddress(
@@ -695,6 +721,8 @@ var TransferAction = class {
     params.toAddress = await this.walletProvider.formatAddress(
       params.toAddress
     );
+    params.data = "null" == params.data + "" ? "0x" : params.data;
+    elizaLogger2.debug("params.data", params.data);
   }
 };
 var transferAction = {
@@ -4785,6 +4813,1886 @@ var deployAction = {
   ]
 };
 
+// src/actions/gnfd.ts
+import { createRequire as createRequire3 } from "module";
+import {
+  composeContext as composeContext8,
+  elizaLogger as elizaLogger9,
+  generateObjectDeprecated as generateObjectDeprecated8,
+  ModelClass as ModelClass8
+} from "@elizaos/core";
+import { readFileSync, statSync } from "fs";
+import { lookup } from "mime-types";
+import { extname } from "node:path";
+
+// src/providers/gnfd.ts
+import { createRequire as createRequire2 } from "module";
+var require3 = createRequire2(import.meta.url);
+var { Client } = require3("@bnb-chain/greenfield-js-sdk");
+var getGnfdConfig = async (runtime) => {
+  const network = runtime.getSetting("GREENFIELD_NETWORK");
+  const config = network === "TESTNET" ? CONFIG["TESTNET"] : CONFIG["MAINNET"];
+  return config;
+};
+var InitGnfdClient = async (runtime) => {
+  const config = await getGnfdConfig(runtime);
+  if (!config.GREENFIELD_CHAIN_ID || !config.GREENFIELD_RPC_URL) {
+    throw new Error("Creating greenfield client params is error");
+  }
+  const client = Client.create(
+    config.GREENFIELD_RPC_URL,
+    config.GREENFIELD_CHAIN_ID
+  );
+  return client;
+};
+var CONFIG = {
+  MAINNET: {
+    NETWORK: "MAINNET",
+    TOKENHUB_ADDRESS: "0xeA97dF87E6c7F68C9f95A69dA79E19B834823F25",
+    CROSSCHAIN_ADDRESS: "0x77e719b714be09F70D484AB81F70D02B0E182f7d",
+    GREENFIELD_RPC_URL: "https://greenfield-chain.bnbchain.org",
+    GREENFIELD_CHAIN_ID: "1017",
+    GREENFIELD_SCAN: "https://greenfieldscan.com"
+  },
+  TESTNET: {
+    NETWORK: "TESTNET",
+    TOKENHUB_ADDRESS: "0xED8e5C546F84442219A5a987EE1D820698528E04",
+    CROSSCHAIN_ADDRESS: "0xa5B2c9194131A4E0BFaCbF9E5D6722c873159cb7",
+    GREENFIELD_RPC_URL: "https://gnfd-testnet-fullnode-tendermint-us.bnbchain.org",
+    GREENFIELD_CHAIN_ID: "5600",
+    GREENFIELD_SCAN: "https://testnet.greenfieldscan.com"
+  }
+};
+
+// src/abi/CrossChainAbi.ts
+var CROSS_CHAIN_ABI = [
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "contractAddr",
+        type: "address"
+      }
+    ],
+    name: "AddChannel",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "uint32",
+        name: "srcChainId",
+        type: "uint32"
+      },
+      {
+        indexed: false,
+        internalType: "uint32",
+        name: "dstChainId",
+        type: "uint32"
+      },
+      {
+        indexed: true,
+        internalType: "uint64",
+        name: "oracleSequence",
+        type: "uint64"
+      },
+      {
+        indexed: true,
+        internalType: "uint64",
+        name: "packageSequence",
+        type: "uint64"
+      },
+      {
+        indexed: true,
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      },
+      {
+        indexed: false,
+        internalType: "bytes",
+        name: "payload",
+        type: "bytes"
+      }
+    ],
+    name: "CrossChainPackage",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      },
+      {
+        indexed: false,
+        internalType: "bool",
+        name: "isEnable",
+        type: "bool"
+      }
+    ],
+    name: "EnableOrDisableChannel",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "uint8",
+        name: "version",
+        type: "uint8"
+      }
+    ],
+    name: "Initialized",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "string",
+        name: "key",
+        type: "string"
+      },
+      {
+        indexed: false,
+        internalType: "bytes",
+        name: "value",
+        type: "bytes"
+      }
+    ],
+    name: "ParamChange",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "bytes32",
+        name: "proposalTypeHash",
+        type: "bytes32"
+      },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "proposer",
+        type: "address"
+      },
+      {
+        indexed: false,
+        internalType: "uint128",
+        name: "quorum",
+        type: "uint128"
+      },
+      {
+        indexed: false,
+        internalType: "uint128",
+        name: "expiredAt",
+        type: "uint128"
+      },
+      {
+        indexed: false,
+        internalType: "bytes32",
+        name: "contentHash",
+        type: "bytes32"
+      }
+    ],
+    name: "ProposalSubmitted",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "uint8",
+        name: "packageType",
+        type: "uint8"
+      },
+      {
+        indexed: true,
+        internalType: "uint64",
+        name: "packageSequence",
+        type: "uint64"
+      },
+      {
+        indexed: true,
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      }
+    ],
+    name: "ReceivedPackage",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "address",
+        name: "executor",
+        type: "address"
+      }
+    ],
+    name: "Reopened",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "address",
+        name: "executor",
+        type: "address"
+      }
+    ],
+    name: "Suspended",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "address",
+        name: "contractAddr",
+        type: "address"
+      },
+      {
+        indexed: false,
+        internalType: "bytes",
+        name: "lowLevelData",
+        type: "bytes"
+      }
+    ],
+    name: "UnexpectedFailureAssertionInPackageHandler",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "address",
+        name: "contractAddr",
+        type: "address"
+      },
+      {
+        indexed: false,
+        internalType: "string",
+        name: "reason",
+        type: "string"
+      }
+    ],
+    name: "UnexpectedRevertInPackageHandler",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "uint64",
+        name: "packageSequence",
+        type: "uint64"
+      },
+      {
+        indexed: true,
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      },
+      {
+        indexed: false,
+        internalType: "bytes",
+        name: "payload",
+        type: "bytes"
+      }
+    ],
+    name: "UnsupportedPackage",
+    type: "event"
+  },
+  {
+    inputs: [],
+    name: "ACK_PACKAGE",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "CANCEL_TRANSFER_PROPOSAL",
+    outputs: [
+      {
+        internalType: "bytes32",
+        name: "",
+        type: "bytes32"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "CODE_OK",
+    outputs: [
+      {
+        internalType: "uint32",
+        name: "",
+        type: "uint32"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "CROSS_CHAIN",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "EMERGENCY_PROPOSAL_EXPIRE_PERIOD",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "EMPTY_CONTENT_HASH",
+    outputs: [
+      {
+        internalType: "bytes32",
+        name: "",
+        type: "bytes32"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "ERROR_FAIL_DECODE",
+    outputs: [
+      {
+        internalType: "uint32",
+        name: "",
+        type: "uint32"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "FAIL_ACK_PACKAGE",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "GOV_CHANNELID",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "GOV_HUB",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "IN_TURN_RELAYER_VALIDITY_PERIOD",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "LIGHT_CLIENT",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "OUT_TURN_RELAYER_BACKOFF_PERIOD",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "PROXY_ADMIN",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "RELAYER_HUB",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "REOPEN_PROPOSAL",
+    outputs: [
+      {
+        internalType: "bytes32",
+        name: "",
+        type: "bytes32"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "SUSPEND_PROPOSAL",
+    outputs: [
+      {
+        internalType: "bytes32",
+        name: "",
+        type: "bytes32"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "SYN_PACKAGE",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TOKEN_HUB",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TRANSFER_IN_CHANNEL_ID",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TRANSFER_OUT_CHANNEL_ID",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "batchSizeForOracle",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "callbackGasPrice",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "address",
+        name: "attacker",
+        type: "address"
+      }
+    ],
+    name: "cancelTransfer",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "chainId",
+    outputs: [
+      {
+        internalType: "uint16",
+        name: "",
+        type: "uint16"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    name: "channelHandlerMap",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    name: "channelReceiveSequenceMap",
+    outputs: [
+      {
+        internalType: "uint64",
+        name: "",
+        type: "uint64"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    name: "channelSendSequenceMap",
+    outputs: [
+      {
+        internalType: "uint64",
+        name: "",
+        type: "uint64"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "bytes32",
+        name: "",
+        type: "bytes32"
+      }
+    ],
+    name: "emergencyProposals",
+    outputs: [
+      {
+        internalType: "uint16",
+        name: "quorum",
+        type: "uint16"
+      },
+      {
+        internalType: "uint128",
+        name: "expiredAt",
+        type: "uint128"
+      },
+      {
+        internalType: "bytes32",
+        name: "contentHash",
+        type: "bytes32"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint8",
+        name: "packageType",
+        type: "uint8"
+      },
+      {
+        internalType: "uint256",
+        name: "_relayFee",
+        type: "uint256"
+      },
+      {
+        internalType: "uint256",
+        name: "_ackRelayFee",
+        type: "uint256"
+      },
+      {
+        internalType: "bytes",
+        name: "msgBytes",
+        type: "bytes"
+      }
+    ],
+    name: "encodePayload",
+    outputs: [
+      {
+        internalType: "bytes",
+        name: "",
+        type: "bytes"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "getRelayFees",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "_relayFee",
+        type: "uint256"
+      },
+      {
+        internalType: "uint256",
+        name: "_minAckRelayFee",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "gnfdChainId",
+    outputs: [
+      {
+        internalType: "uint16",
+        name: "",
+        type: "uint16"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "bytes",
+        name: "_payload",
+        type: "bytes"
+      },
+      {
+        internalType: "bytes",
+        name: "_blsSignature",
+        type: "bytes"
+      },
+      {
+        internalType: "uint256",
+        name: "_validatorsBitSet",
+        type: "uint256"
+      }
+    ],
+    name: "handlePackage",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint16",
+        name: "_gnfdChainId",
+        type: "uint16"
+      }
+    ],
+    name: "initialize",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "isSuspended",
+    outputs: [
+      {
+        internalType: "bool",
+        name: "",
+        type: "bool"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "minAckRelayFee",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "oracleSequence",
+    outputs: [
+      {
+        internalType: "int64",
+        name: "",
+        type: "int64"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "previousTxHeight",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "bytes32",
+        name: "",
+        type: "bytes32"
+      }
+    ],
+    name: "quorumMap",
+    outputs: [
+      {
+        internalType: "uint16",
+        name: "",
+        type: "uint16"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      },
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    name: "registeredContractChannelMap",
+    outputs: [
+      {
+        internalType: "bool",
+        name: "",
+        type: "bool"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "relayFee",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "reopen",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      },
+      {
+        internalType: "bytes",
+        name: "msgBytes",
+        type: "bytes"
+      },
+      {
+        internalType: "uint256",
+        name: "_relayFee",
+        type: "uint256"
+      },
+      {
+        internalType: "uint256",
+        name: "_ackRelayFee",
+        type: "uint256"
+      }
+    ],
+    name: "sendSynPackage",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "suspend",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "txCounter",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "string",
+        name: "key",
+        type: "string"
+      },
+      {
+        internalType: "bytes",
+        name: "value",
+        type: "bytes"
+      }
+    ],
+    name: "updateParam",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "upgradeInfo",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "version",
+        type: "uint256"
+      },
+      {
+        internalType: "string",
+        name: "name",
+        type: "string"
+      },
+      {
+        internalType: "string",
+        name: "description",
+        type: "string"
+      }
+    ],
+    stateMutability: "pure",
+    type: "function"
+  }
+];
+
+// src/abi/TokenHubAbi.ts
+var TOKENHUB_ABI = [
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "uint8",
+        name: "version",
+        type: "uint8"
+      }
+    ],
+    name: "Initialized",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "string",
+        name: "key",
+        type: "string"
+      },
+      {
+        indexed: false,
+        internalType: "bytes",
+        name: "value",
+        type: "bytes"
+      }
+    ],
+    name: "ParamChange",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "address",
+        name: "from",
+        type: "address"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256"
+      }
+    ],
+    name: "ReceiveTransferIn",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "address",
+        name: "refundAddr",
+        type: "address"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256"
+      },
+      {
+        indexed: false,
+        internalType: "uint32",
+        name: "status",
+        type: "uint32"
+      }
+    ],
+    name: "RefundFailure",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "address",
+        name: "refundAddr",
+        type: "address"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256"
+      },
+      {
+        indexed: false,
+        internalType: "uint32",
+        name: "status",
+        type: "uint32"
+      }
+    ],
+    name: "RefundSuccess",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "address",
+        name: "to",
+        type: "address"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256"
+      }
+    ],
+    name: "RewardTo",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "address",
+        name: "refundAddr",
+        type: "address"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256"
+      }
+    ],
+    name: "TransferInSuccess",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "address",
+        name: "senderAddr",
+        type: "address"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "relayFee",
+        type: "uint256"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "ackRelayFee",
+        type: "uint256"
+      }
+    ],
+    name: "TransferOutSuccess",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      },
+      {
+        indexed: false,
+        internalType: "bytes",
+        name: "msgBytes",
+        type: "bytes"
+      }
+    ],
+    name: "UnexpectedPackage",
+    type: "event"
+  },
+  {
+    inputs: [],
+    name: "APP_CHANNELID",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "CODE_OK",
+    outputs: [
+      {
+        internalType: "uint32",
+        name: "",
+        type: "uint32"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "CROSS_CHAIN",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "ERROR_FAIL_DECODE",
+    outputs: [
+      {
+        internalType: "uint32",
+        name: "",
+        type: "uint32"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "GOV_CHANNELID",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "GOV_HUB",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "LIGHT_CLIENT",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "MAX_GAS_FOR_TRANSFER_BNB",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "PROXY_ADMIN",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "RELAYER_HUB",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "REWARD_UPPER_LIMIT",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TOKEN_HUB",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TRANSFER_IN_CHANNELID",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TRANSFER_IN_FAILURE_INSUFFICIENT_BALANCE",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TRANSFER_IN_FAILURE_NON_PAYABLE_RECIPIENT",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TRANSFER_IN_FAILURE_UNKNOWN",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TRANSFER_IN_SUCCESS",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "TRANSFER_OUT_CHANNELID",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256"
+      }
+    ],
+    name: "claimRelayFee",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256"
+      }
+    ],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "govHub",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      },
+      {
+        internalType: "bytes",
+        name: "msgBytes",
+        type: "bytes"
+      }
+    ],
+    name: "handleAckPackage",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      },
+      {
+        internalType: "bytes",
+        name: "msgBytes",
+        type: "bytes"
+      }
+    ],
+    name: "handleFailAckPackage",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint8",
+        name: "channelId",
+        type: "uint8"
+      },
+      {
+        internalType: "bytes",
+        name: "msgBytes",
+        type: "bytes"
+      }
+    ],
+    name: "handleSynPackage",
+    outputs: [
+      {
+        internalType: "bytes",
+        name: "",
+        type: "bytes"
+      }
+    ],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "initialize",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "address",
+        name: "recipient",
+        type: "address"
+      },
+      {
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256"
+      }
+    ],
+    name: "transferOut",
+    outputs: [
+      {
+        internalType: "bool",
+        name: "",
+        type: "bool"
+      }
+    ],
+    stateMutability: "payable",
+    type: "function"
+  },
+  {
+    stateMutability: "payable",
+    type: "receive"
+  }
+];
+
+// src/actions/gnfd.ts
+import { parseEther as parseEther5 } from "viem";
+var require4 = createRequire3(import.meta.url);
+var {
+  Client: Client2,
+  Long,
+  VisibilityType
+} = require4("@bnb-chain/greenfield-js-sdk");
+var GreenfieldAction = class {
+  constructor(walletProvider, gnfdClient) {
+    this.walletProvider = walletProvider;
+    this.gnfdClient = gnfdClient;
+  }
+  async getSps() {
+    const sps = await this.gnfdClient.sp.getStorageProviders();
+    return sps;
+  }
+  async selectSp() {
+    const finalSps = await this.getSps();
+    const selectIndex = Math.floor(Math.random() * finalSps.length);
+    const secondarySpAddresses = [
+      ...finalSps.slice(0, selectIndex),
+      ...finalSps.slice(selectIndex + 1)
+    ].map((item) => item.operatorAddress);
+    const selectSpInfo = {
+      id: finalSps[selectIndex].id,
+      endpoint: finalSps[selectIndex].endpoint,
+      primarySpAddress: finalSps[selectIndex]?.operatorAddress,
+      sealAddress: finalSps[selectIndex].sealAddress,
+      secondarySpAddresses
+    };
+    return selectSpInfo;
+  }
+  async bnbTransferToGnfd(amount, runtime) {
+    const config = await getGnfdConfig(runtime);
+    const chain = config.NETWORK === "TESTNET" ? "bscTestnet" : "bsc";
+    this.walletProvider.switchChain(chain);
+    const publicClient = this.walletProvider.getPublicClient(chain);
+    const walletClient = this.walletProvider.getWalletClient(chain);
+    const [relayFee, ackRelayFee] = await publicClient.readContract({
+      address: config.CROSSCHAIN_ADDRESS,
+      abi: CROSS_CHAIN_ABI,
+      functionName: "getRelayFees"
+    });
+    const relayerFee = relayFee + ackRelayFee;
+    const totalAmount = relayerFee + amount;
+    const { request } = await publicClient.simulateContract({
+      account: this.walletProvider.getAccount(),
+      address: config.TOKENHUB_ADDRESS,
+      abi: TOKENHUB_ABI,
+      functionName: "transferOut",
+      args: [this.walletProvider.getAddress(), amount],
+      value: totalAmount
+    });
+    const hash = await walletClient.writeContract(request);
+    const tx = await publicClient.waitForTransactionReceipt({
+      hash
+    });
+    return tx.transactionHash;
+  }
+  async createBucket(msg) {
+    elizaLogger9.log("create bucket...");
+    const createBucketTx = await this.gnfdClient.bucket.createBucket(msg);
+    const createBucketTxSimulateInfo = await createBucketTx.simulate({
+      denom: "BNB"
+    });
+    const createBucketTxRes = await createBucketTx.broadcast({
+      denom: "BNB",
+      gasLimit: Number(createBucketTxSimulateInfo?.gasLimit),
+      gasPrice: createBucketTxSimulateInfo?.gasPrice || "5000000000",
+      payer: msg.paymentAddress,
+      granter: "",
+      privateKey: this.walletProvider.getPk()
+    });
+    elizaLogger9.log("createBucketTxRes", createBucketTxRes);
+    if (createBucketTxRes.code === 0) {
+      elizaLogger9.log("create bucket success");
+    }
+    return createBucketTxRes.transactionHash;
+  }
+  async headBucket(bucketName) {
+    const { bucketInfo } = await this.gnfdClient.bucket.headBucket(bucketName);
+    return bucketInfo.id;
+  }
+  async uploadObject(msg) {
+    const uploadRes = await this.gnfdClient.object.delegateUploadObject(
+      msg,
+      {
+        type: "ECDSA",
+        privateKey: this.walletProvider.getPk()
+      }
+    );
+    if (uploadRes.code === 0) {
+      elizaLogger9.log("upload object success");
+    }
+    return uploadRes.message;
+  }
+  async headObject(bucketName, objectName) {
+    const { objectInfo } = await this.gnfdClient.object.headObject(bucketName, objectName);
+    return objectInfo.id;
+  }
+  async deleteObject(msg) {
+    const deleteObjectTx = await this.gnfdClient.object.deleteObject(msg);
+    const simulateInfo = await deleteObjectTx.simulate({
+      denom: "BNB"
+    });
+    const res = await deleteObjectTx.broadcast({
+      denom: "BNB",
+      gasLimit: Number(simulateInfo?.gasLimit),
+      gasPrice: simulateInfo?.gasPrice || "5000000000",
+      payer: msg.operator,
+      granter: "",
+      privateKey: this.walletProvider.getPk()
+    });
+    if (res.code === 0) {
+      elizaLogger9.log("delete success");
+    }
+    return res.transactionHash;
+  }
+};
+var greenfieldAction = {
+  name: "GREENFIELD_ACTION",
+  description: "create bucket, upload object, delete object on the greenfield chain",
+  handler: async (runtime, message, state, _options, callback) => {
+    elizaLogger9.log("Starting Gnfd action...");
+    if (!state) {
+      state = await runtime.composeState(message);
+    } else {
+      state = await runtime.updateRecentMessageState(state);
+    }
+    const context = composeContext8({
+      state,
+      template: greenfieldTemplate
+    });
+    const content = await generateObjectDeprecated8({
+      runtime,
+      context,
+      modelClass: ModelClass8.LARGE
+    });
+    elizaLogger9.log("content", content);
+    const config = await getGnfdConfig(runtime);
+    const gnfdClient = await InitGnfdClient(runtime);
+    const walletProvider = initWalletProvider(runtime);
+    const action = new GreenfieldAction(walletProvider, gnfdClient);
+    const actionType = content.actionType;
+    const spInfo = await action.selectSp();
+    elizaLogger9.log("content", content);
+    const { bucketName, objectName } = content;
+    const attachments = message.content.attachments;
+    try {
+      let result = "";
+      switch (actionType) {
+        case "createBucket": {
+          const msg = {
+            bucketName,
+            creator: walletProvider.account.address,
+            visibility: VisibilityType.VISIBILITY_TYPE_PUBLIC_READ,
+            chargedReadQuota: Long.fromString("0"),
+            paymentAddress: walletProvider.account.address,
+            primarySpAddress: spInfo.primarySpAddress
+          };
+          const hash = await action.createBucket(msg);
+          const bucketId = await action.headBucket(msg.bucketName);
+          result = `create bucket successfully, details: ${config.GREENFIELD_SCAN}/bucket/${toHex(bucketId)}`;
+          break;
+        }
+        case "uploadObject": {
+          if (!attachments) {
+            throw new Error("no file to upload");
+          }
+          const uploadObjName = objectName;
+          await action.uploadObject({
+            bucketName,
+            objectName: uploadObjName,
+            body: generateFile(attachments[0]),
+            delegatedOpts: {
+              visibility: VisibilityType.VISIBILITY_TYPE_PUBLIC_READ
+            }
+          });
+          const objectId = await action.headObject(bucketName, objectName);
+          if (attachments.length > 1) {
+            result += `Only one object can be uploaded. 
+`;
+          }
+          result += `Upload object (${uploadObjName}) successfully, details: ${config.GREENFIELD_SCAN}/object/${toHex(objectId)}`;
+          break;
+        }
+        case "deleteObject": {
+          const hash = await action.deleteObject({
+            bucketName,
+            objectName,
+            operator: walletProvider.account.address
+          });
+          result = `delete object successfully, hash: 0x${hash}`;
+          break;
+        }
+        case "crossChainTransfer": {
+          const hash = await action.bnbTransferToGnfd(parseEther5(String(content.amount)), runtime);
+          result = `transfer bnb to greenfield successfully, hash: ${hash}`;
+          break;
+        }
+      }
+      if (result) {
+        callback?.({
+          text: result
+        });
+      } else {
+        callback?.({
+          text: `Unsuccessfully ${actionType || ""}`,
+          content: result
+        });
+      }
+      return true;
+    } catch (error) {
+      elizaLogger9.error("Error execute greenfield action:", error.message);
+      callback?.({
+        text: `Bridge failed: ${error.message}`,
+        content: { error: error.message }
+      });
+      return false;
+    }
+  },
+  template: greenfieldTemplate,
+  validate: async (_runtime) => {
+    return true;
+  },
+  examples: [
+    [
+      {
+        user: "user",
+        content: {
+          text: "Create a bucket(${bucketName}) on greenfield",
+          action: "GREENFIELD_ACTION"
+        }
+      },
+      {
+        user: "user",
+        content: {
+          text: "Upload a object(${objectName}) in bucket(${bucketName}) on greenfield",
+          action: "GREENFIELD_ACTION"
+        }
+      },
+      {
+        user: "user",
+        content: {
+          text: "Delete object(${objectName}) in bucket(${bucketName}) on greenfield",
+          action: "GREENFIELD_ACTION"
+        }
+      },
+      {
+        user: "user",
+        content: {
+          text: "Cross Chain Transfer 0.00001 BNB to myself greenfield for create account",
+          action: "GREENFIELD_ACTION",
+          content: {
+            amount: "0.00001"
+          }
+        }
+      }
+    ]
+  ],
+  similes: [
+    "GREENFIELD_ACTION",
+    "CREATE_BUCKET",
+    "UPLOAD_OBJECT",
+    "DELETE_BUCKET",
+    "TRANSFER_BNB_TO_GREENFIELD"
+  ]
+};
+function generateFile(attachment) {
+  const filePath = fixPath(attachment.url);
+  elizaLogger9.log("filePath", filePath);
+  const stats = statSync(filePath);
+  const fileSize = stats.size;
+  const name = extname(filePath);
+  const type = lookup(name);
+  if (!type) throw new Error(`Unsupported file type: ${filePath}`);
+  return {
+    name: filePath,
+    type,
+    size: fileSize,
+    content: readFileSync(filePath)
+  };
+}
+function fixPath(url) {
+  return url.replace("/agent/agent/", "/agent/");
+}
+function toHex(n) {
+  return "0x" + Number(n).toString(16).padStart(64, "0");
+}
+
 // src/index.ts
 var bnbPlugin = {
   name: "bnb",
@@ -4799,7 +6707,8 @@ var bnbPlugin = {
     bridgeAction,
     stakeAction,
     faucetAction,
-    deployAction
+    deployAction,
+    greenfieldAction
   ]
 };
 var index_default = bnbPlugin;

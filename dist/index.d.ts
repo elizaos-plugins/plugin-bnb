@@ -1,5 +1,5 @@
 import { IAgentRuntime, Provider, Memory, State, HandlerCallback, Plugin } from '@elizaos/core';
-import { Address, Hash, Chain, PrivateKeyAccount, PublicClient, HttpTransport, Account, WalletClient, Hex } from 'viem';
+import { Hash, Address, Chain, PrivateKeyAccount, PublicClient, HttpTransport, Account, WalletClient, Hex } from 'viem';
 
 type SupportedChain = "bsc" | "bscTestnet" | "opBNB" | "opBNBTestnet";
 type StakeAction = "deposit" | "withdraw" | "claim";

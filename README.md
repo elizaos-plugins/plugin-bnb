@@ -1,4 +1,4 @@
-# `@ai16z/plugin-bnb`
+# `@elizaos/plugin-bnb`
 
 This plugin enables interaction with the BNB Chain ecosystem, providing support for BNB Smart Chain, opBNB, and BNB Greenfield networks.
 
