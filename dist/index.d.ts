@@ -1,5 +1,6 @@
 import { IAgentRuntime, Provider, Memory, State, HandlerCallback, Plugin } from '@elizaos/core';
-import { Address, Hash, Chain, PrivateKeyAccount, PublicClient, HttpTransport, Account, WalletClient, Hex } from 'viem';
+import { Hash, Address, Chain, PrivateKeyAccount, PublicClient, HttpTransport, Account, WalletClient, Hex, Abi } from 'viem';
+import { z } from 'zod';
 
 type SupportedChain = "bsc" | "bscTestnet" | "opBNB" | "opBNBTestnet";
 type StakeAction = "deposit" | "withdraw" | "claim";
@@ -2479,8 +2480,8 @@ declare class WalletProvider {
     getWalletClient(chainName: SupportedChain): WalletClient;
     getChainConfigs(chainName: SupportedChain): Chain;
     configureLiFiSdk(chainName: SupportedChain): void;
-    formatAddress(address: string): Promise<Address>;
-    resolveWeb3Name(name: string): Promise<string | null>;
+    formatAddress(address: string | null | undefined): Promise<Address>;
+    resolveWeb3Name(name: string | null | undefined): Promise<string | null>;
     checkERC20Allowance(chain: SupportedChain, token: Address, owner: Address, spender: Address): Promise<bigint>;
     approveERC20(chain: SupportedChain, token: Address, spender: Address, amount: bigint): Promise<Hex>;
     transfer(chain: SupportedChain, toAddress: Address, amount: bigint, options?: {
@@ -2494,6 +2495,12 @@ declare class WalletProvider {
     }): Promise<Hex>;
     getBalance(): Promise<string>;
     getTokenAddress(chainName: SupportedChain, tokenSymbol: string): Promise<string>;
+    /**
+     * Gets testnet token address from predefined mapping
+     * This is a custom method for testnet tokens since the regular token lookup
+     * doesn't work on testnets.
+     */
+    getTestnetTokenAddress(tokenSymbol: string): string | null;
     addChain(chain: Record<string, Chain>): void;
     switchChain(chainName: SupportedChain, customRpcUrl?: string): void;
     private setAccount;
@@ -2507,6 +2514,8 @@ declare const bnbWalletProvider: Provider;
 
 declare const transferTemplate = "Given the recent messages and wallet information below:\n\n{{recentMessages}}\n\n{{walletInfo}}\n\nExtract the following information about the requested transfer:\n- Chain to execute on. Must be one of [\"bsc\", \"bscTestnet\", \"opBNB\", \"opBNBTestnet\"]. Default is \"bsc\".\n- Token symbol or address(string starting with \"0x\"). Optional.\n- Amount to transfer. Optional. Must be a string representing the amount in ether (only number without coin symbol, e.g., \"0.1\").\n- Recipient address. Must be a valid Ethereum address starting with \"0x\" or a web3 domain name.\n- Data. Optional, data to be included in the transaction.\nIf any field is not provided, use the default value. If no default value is specified, use null.\n\nRespond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:\n\n```json\n{\n    \"chain\": SUPPORTED_CHAINS,\n    \"token\": string | null,\n    \"amount\": string | null,\n    \"toAddress\": string,\n    \"data\": string | null\n}\n```\n";
 declare const swapTemplate = "Given the recent messages and wallet information below:\n\n{{recentMessages}}\n\n{{walletInfo}}\n\nExtract the following information about the requested token swap:\n- Chain to execute on. Must be one of [\"bsc\", \"bscTestnet\", \"opBNB\", \"opBNBTestnet\"]. Default is \"bsc\".\n- Input token symbol or address(string starting with \"0x\").\n- Output token symbol or address(string starting with \"0x\").\n- Amount to swap. Must be a string representing the amount in ether (only number without coin symbol, e.g., \"0.1\").\n- Slippage. Optional, expressed as decimal proportion, 0.03 represents 3%.\nIf any field is not provided, use the default value. If no default value is specified, use null.\n\nRespond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:\n\n```json\n{\n    \"chain\": SUPPORTED_CHAINS,\n    \"inputToken\": string | null,\n    \"outputToken\": string | null,\n    \"amount\": string | null,\n    \"slippage\": number | null\n}\n```\n";
+declare const bridgeTemplate = "Given the recent messages and wallet information below:\n\n{{recentMessages}}\n\n{{walletInfo}}\n\nExtract the following information about the requested token bridge:\n- From chain. Must be one of [\"bsc\", \"opBNB\"].\n- To chain. Must be one of [\"bsc\", \"opBNB\"].\n- From token address. Optional, must be a valid Ethereum address starting with \"0x\".\n- To token address. Optional, must be a valid Ethereum address starting with \"0x\".\n- Amount to bridge. Must be a string representing the amount in ether (only number without coin symbol, e.g., \"0.1\").\n- To address. Optional, must be a valid Ethereum address starting with \"0x\" or a web3 domain name.\n\nRespond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:\n\n```json\n{\n    \"fromChain\": \"bsc\" | \"opBNB\",\n    \"toChain\": \"bsc\" | \"opBNB\",\n    \"fromToken\": string | null,\n    \"toToken\": string | null,\n    \"amount\": string,\n    \"toAddress\": string | null\n}\n```\n";
+declare const ercContractTemplate = "Given the recent messages and wallet information below:\n\n{{recentMessages}}\n\n{{walletInfo}}\n\nWhen user wants to deploy any type of token contract (ERC20/721/1155), this will trigger the DEPLOY_TOKEN action.\n\nExtract the following details for deploying a token contract:\n- Chain to execute on. Must be one of [\"bsc\", \"bscTestnet\", \"opBNB\", \"opBNBTestnet\"]. Default is \"bsc\".\n- contractType: The type of token contract to deploy\n  - For ERC20: Extract name, symbol, decimals, totalSupply\n  - For ERC721: Extract name, symbol, baseURI\n  - For ERC1155: Extract name, baseURI\n- name: The name of the token.\n- symbol: The token symbol (only for ERC20/721).\n- decimals: Token decimals (only for ERC20). Default is 18.\n- totalSupply: Total supply with decimals (only for ERC20). Default is \"1000000000000000000\".\n- baseURI: Base URI for token metadata (only for ERC721/1155).\nIf any field is not provided, use the default value. If no default value is provided, use empty string.\n\nRespond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:\n\n```json\n{\n    \"chain\": SUPPORTED_CHAINS,\n    \"contractType\": \"ERC20\" | \"ERC721\" | \"ERC1155\",\n    \"name\": string,\n    \"symbol\": string | null,\n    \"decimals\": number | null,\n    \"totalSupply\": string | null,\n    \"baseURI\": string | null\n}\n```\n";
 
 declare class SwapAction {
     private walletProvider;
@@ -2601,6 +2610,213 @@ declare const transferAction: {
     similes: string[];
 };
 
+declare class BridgeAction {
+    private walletProvider;
+    private readonly L1_BRIDGE_ADDRESS;
+    private readonly L2_BRIDGE_ADDRESS;
+    private readonly LEGACY_ERC20_ETH;
+    constructor(walletProvider: WalletProvider);
+    bridge(params: BridgeParams): Promise<BridgeResponse>;
+    validateAndNormalizeParams(params: BridgeParams): Promise<void>;
+}
+declare const bridgeAction: {
+    name: string;
+    description: string;
+    handler: (runtime: IAgentRuntime, message: Memory, state: State, _options: Record<string, unknown>, callback?: HandlerCallback) => Promise<boolean>;
+    template: string;
+    validate: (runtime: IAgentRuntime) => Promise<boolean>;
+    examples: (({
+        user: string;
+        content: {
+            text: string;
+            action?: undefined;
+            content?: undefined;
+        };
+    } | {
+        user: string;
+        content: {
+            text: string;
+            action: string;
+            content: {
+                fromChain: string;
+                toChain: string;
+                fromToken: undefined;
+                toToken: undefined;
+                amount: string;
+            };
+        };
+    })[] | ({
+        user: string;
+        content: {
+            text: string;
+            action?: undefined;
+            content?: undefined;
+        };
+    } | {
+        user: string;
+        content: {
+            text: string;
+            action: string;
+            content: {
+                fromChain: string;
+                toChain: string;
+                fromToken: undefined;
+                toToken: undefined;
+                amount: string;
+                toAddress: string;
+            };
+        };
+    })[] | ({
+        user: string;
+        content: {
+            text: string;
+            action?: undefined;
+            content?: undefined;
+        };
+    } | {
+        user: string;
+        content: {
+            text: string;
+            action: string;
+            content: {
+                fromChain: string;
+                toChain: string;
+                fromToken: string;
+                toToken: string;
+                amount: string;
+                toAddress: string;
+            };
+        };
+    })[] | ({
+        user: string;
+        content: {
+            text: string;
+            action?: undefined;
+            content?: undefined;
+        };
+    } | {
+        user: string;
+        content: {
+            text: string;
+            action: string;
+            content: {
+                fromChain: string;
+                toChain: string;
+                fromToken: string;
+                toToken: undefined;
+                amount: string;
+                toAddress: string;
+            };
+        };
+    })[])[];
+    similes: string[];
+};
+
+declare class DeployAction {
+    private walletProvider;
+    constructor(walletProvider: WalletProvider);
+    compileSolidity(contractName: string, source: string): Promise<{
+        abi: Abi;
+        bytecode: any;
+    }>;
+    deployERC20(deployTokenParams: IDeployERC20Params): Promise<{
+        address: `0x${string}`;
+    }>;
+    deployERC721(deployNftParams: IDeployERC721Params): Promise<{
+        address: `0x${string}`;
+    }>;
+    deployERC1155(deploy1155Params: IDeployERC1155Params): Promise<{
+        address: `0x${string}`;
+    }>;
+    deployContract(chain: SupportedChain, contractName: string, args: any[]): Promise<Address | null | undefined>;
+}
+declare const deployAction: {
+    name: string;
+    description: string;
+    handler: (runtime: IAgentRuntime, message: Memory, state: State, _options: Record<string, unknown>, callback?: HandlerCallback) => Promise<boolean>;
+    template: string;
+    validate: (_runtime: IAgentRuntime) => Promise<boolean>;
+    examples: {
+        user: string;
+        content: {
+            text: string;
+            action: string;
+        };
+    }[][];
+    similes: string[];
+};
+
+declare const bnbEnvSchema: z.ZodObject<{
+    BNB_PRIVATE_KEY: z.ZodOptional<z.ZodString>;
+    BNB_PUBLIC_KEY: z.ZodOptional<z.ZodString>;
+    BSC_PROVIDER_URL: z.ZodDefault<z.ZodString>;
+    BSC_TESTNET_PROVIDER_URL: z.ZodDefault<z.ZodString>;
+    OPBNB_PROVIDER_URL: z.ZodDefault<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    BSC_PROVIDER_URL: string;
+    BSC_TESTNET_PROVIDER_URL: string;
+    OPBNB_PROVIDER_URL: string;
+    BNB_PRIVATE_KEY?: string | undefined;
+    BNB_PUBLIC_KEY?: string | undefined;
+}, {
+    BNB_PRIVATE_KEY?: string | undefined;
+    BNB_PUBLIC_KEY?: string | undefined;
+    BSC_PROVIDER_URL?: string | undefined;
+    BSC_TESTNET_PROVIDER_URL?: string | undefined;
+    OPBNB_PROVIDER_URL?: string | undefined;
+}>;
+type BnbConfig = z.infer<typeof bnbEnvSchema>;
+/**
+ * Get configuration with defaults
+ */
+declare function getConfig(): BnbConfig;
+/**
+ * Validate BNB configuration using runtime settings or environment variables
+ */
+declare function validateBnbConfig(runtime: IAgentRuntime): Promise<BnbConfig>;
+/**
+ * Check if a wallet is configured (either private or public key)
+ */
+declare function hasWalletConfigured(config: BnbConfig): boolean;
+
+declare class GetBalanceTestnetAction {
+    private walletProvider;
+    constructor(walletProvider: WalletProvider);
+    normalizeTokenAddress(address: string): string | null;
+    private debugChainAndToken;
+    private checkBalanceViaBscScan;
+    getBalance(params: GetBalanceParams): Promise<GetBalanceResponse>;
+    getERC20TokenBalance(chain: SupportedChain, address: Address, tokenAddress: Address): Promise<string>;
+    validateAndNormalizeParams(params: GetBalanceParams): Promise<void>;
+}
+declare const getBalanceTestnetAction: {
+    name: string;
+    description: string;
+    handler: (runtime: IAgentRuntime, message: Memory, state: State, _options: Record<string, unknown>, callback?: HandlerCallback) => Promise<boolean>;
+    template: string;
+    validate: (_runtime: IAgentRuntime) => Promise<boolean>;
+    examples: ({
+        user: string;
+        content: {
+            text: string;
+            action?: undefined;
+            content?: undefined;
+        };
+    } | {
+        user: string;
+        content: {
+            text: string;
+            action: string;
+            content: {
+                chain: string;
+                address: string;
+                token: string;
+            };
+        };
+    })[][];
+    similes: string[];
+};
+
 declare const bnbPlugin: Plugin;
 
-export { type BridgeParams, type BridgeResponse, type FaucetParams, type FaucetResponse, type GetBalanceParams, type GetBalanceResponse, type IDeployERC1155Params, type IDeployERC20Params, type IDeployERC721Params, L1StandardBridgeAbi, L2StandardBridgeAbi, ListaDaoAbi, type StakeAction, type StakeParams, type StakeResponse, type SupportedChain, SwapAction, type SwapParams, type SwapResponse, TransferAction, type TransferParams, type TransferResponse, WalletProvider, bnbPlugin, bnbWalletProvider, bnbPlugin as default, initWalletProvider, swapAction, swapTemplate, transferAction, transferTemplate };
+export { type BnbConfig, BridgeAction, type BridgeParams, type BridgeResponse, DeployAction, type FaucetParams, type FaucetResponse, type GetBalanceParams, type GetBalanceResponse, GetBalanceTestnetAction, type IDeployERC1155Params, type IDeployERC20Params, type IDeployERC721Params, L1StandardBridgeAbi, L2StandardBridgeAbi, ListaDaoAbi, type StakeAction, type StakeParams, type StakeResponse, type SupportedChain, SwapAction, type SwapParams, type SwapResponse, TransferAction, type TransferParams, type TransferResponse, WalletProvider, bnbEnvSchema, bnbPlugin, bnbWalletProvider, bridgeAction, bridgeTemplate, bnbPlugin as default, deployAction, ercContractTemplate, getBalanceTestnetAction, getConfig, hasWalletConfigured, initWalletProvider, swapAction, swapTemplate, transferAction, transferTemplate, validateBnbConfig };

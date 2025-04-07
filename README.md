@@ -23,6 +23,7 @@ By default, the RPC URL is inferred from the `viem/chains` config. To use custom
 
 ```env
 BSC_PROVIDER_URL=https://your-custom-bsc-rpc-url
+BSC_TESTNET_PROVIDER_URL=https://your-custom-bsc-rpc-url
 OPBNB_PROVIDER_URL=https://your-custom-opbnb-rpc-url
 ```
 
@@ -49,6 +50,7 @@ Get the balance of an address on BSC. Just specify the:
 
 ```bash
 Get the USDC balance of 0x1234567890 on BSC.
+Get the BNB balance of 0x1234567890 on BSC Testnet.
 ```
 
 ### Transfer
@@ -65,6 +67,7 @@ Transfer tokens from one address to another on BSC/opBNB. Just specify the:
 
 ```bash
 Transfer 1 BNB to 0xRecipient on BSC.
+Transfer 1 USDC to 0xRecipient on BSC.
 ```
 
 ### Swap
@@ -80,7 +83,7 @@ Swap tokens from one address to another on BSC. Just specify the:
 **Example usage:**
 
 ```bash
-Swap 1 BNB to USDC on BSC.
+Swap 0.001 BNB to USDC on BSC.
 ```
 
 ### Bridge
@@ -97,7 +100,8 @@ Bridge tokens from one chain to another on BSC/opBNB. Just specify the:
 **Example usage:**
 
 ```bash
-Bridge 1 BNB from BSC to opBNB.
+Bridge 0.001 BNB from BSC to opBNB.
+Withdraw 0.001 BNB from opBNB to BSC
 ```
 
 ### Stake
@@ -111,8 +115,17 @@ Perform staking operations on BSC through [Lista Dao](https://lista.org/liquid-s
 **Example usage:**
 
 ```bash
-Deposit 1 BNB to Lista Dao.
+Deposit 0.0001 BNB to Lista Dao.
 ```
+
+### Deploy
+Deploy  ERC1155/ERC721/ERC20 smart contract 
+**Example usage:**
+
+```bash
+Deploy an ERC20 token with name 'ClydePepper', symbol ClydePepper, decimals 18, total supply 10000 on BSC
+```
+
 
 ### Faucet
 
