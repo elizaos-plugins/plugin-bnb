@@ -89,7 +89,8 @@ export class TransferAction {
             token: params.token,
         };
 
-        if (!params.token || params.token === nativeToken) {
+        if (!params.token || params.token =="null" || params.token === nativeToken) {
+            elizaLogger.debug("Native token transfer:", nativeToken);
             // Native token transfer
             const options: { gas?: bigint; gasPrice?: bigint; data?: Hex } = {
                 data: dataParam,
@@ -120,6 +121,7 @@ export class TransferAction {
             );
         } else {
             // ERC20 token transfer
+            elizaLogger.debug("ERC20 token transfer");
             let tokenAddress = params.token;
             elizaLogger.debug(`Token before address resolution: ${params.token}`);
             
@@ -242,6 +244,10 @@ export class TransferAction {
         params.toAddress = await this.walletProvider.formatAddress(
             params.toAddress
         );
+
+        params.data = ("null" == params.data + "") ? "0x" : params.data;
+        elizaLogger.debug("params.data" , params.data);
+
     }
 }
 

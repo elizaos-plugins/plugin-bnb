@@ -22,6 +22,7 @@ import { stakeAction } from "./actions/stake";
 import { faucetAction } from "./actions/faucet";
 import { deployAction } from "./actions/deploy";
 import { getConfig } from "./environment";
+import { greenfieldAction } from "./actions/gnfd";
 
 // Start the loader
 const spinner = ora({
@@ -38,6 +39,7 @@ const actions = [
     stakeAction,
     faucetAction,
     deployAction,
+  greenfieldAction
 ];
 
 const BNB_SPLASH = true;
