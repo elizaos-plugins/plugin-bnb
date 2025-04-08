@@ -949,7 +949,6 @@ var TransferAction = class {
   TRANSFER_GAS = 21000n;
   DEFAULT_GAS_PRICE = 3000000000n;
   async transfer(params) {
-
     elizaLogger3.debug("Starting transfer with params:", JSON.stringify(params, null, 2));
     elizaLogger3.debug(`Chain before validation: ${params.chain}`);
     elizaLogger3.debug(`Available chains:`, Object.keys(this.walletProvider.chains));
@@ -966,7 +965,6 @@ var TransferAction = class {
     }
     await this.validateAndNormalizeParams(params);
     elizaLogger3.debug("After address validation, params:", JSON.stringify(params, null, 2));
-
     const fromAddress = this.walletProvider.getAddress();
     elizaLogger3.debug(`From address: ${fromAddress}`);
     elizaLogger3.debug(`Switching to chain: ${params.chain}`);
@@ -989,7 +987,7 @@ var TransferAction = class {
       token: params.token
     };
     if (!params.token || params.token == "null" || params.token === nativeToken) {
-      elizaLogger2.debug("Native token transfer:", nativeToken);
+      elizaLogger3.debug("Native token transfer:", nativeToken);
       const options = {
         data: dataParam
       };
@@ -1015,7 +1013,7 @@ var TransferAction = class {
         options
       );
     } else {
-      elizaLogger2.debug("ERC20 token transfer");
+      elizaLogger3.debug("ERC20 token transfer");
       let tokenAddress = params.token;
       elizaLogger3.debug(`Token before address resolution: ${params.token}`);
       if (params.token === "BNB" || params.token === "bnb") {
@@ -1112,7 +1110,7 @@ var TransferAction = class {
       params.toAddress
     );
     params.data = "null" == params.data + "" ? "0x" : params.data;
-    elizaLogger2.debug("params.data", params.data);
+    elizaLogger3.debug("params.data", params.data);
   }
 };
 var transferAction = {
@@ -10871,10 +10869,10 @@ Transaction Hash: ${faucetResp.txHash}`,
 // src/actions/gnfd.ts
 import { createRequire as createRequire3 } from "module";
 import {
-  composeContext as composeContext8,
-  elizaLogger as elizaLogger9,
-  generateObjectDeprecated as generateObjectDeprecated8,
-  ModelClass as ModelClass8
+  composeContext as composeContext9,
+  elizaLogger as elizaLogger11,
+  generateObjectDeprecated as generateObjectDeprecated9,
+  ModelClass as ModelClass9
 } from "@elizaos/core";
 import { readFileSync, statSync } from "fs";
 import { lookup } from "mime-types";
@@ -12518,7 +12516,7 @@ var GreenfieldAction = class {
     return tx.transactionHash;
   }
   async createBucket(msg) {
-    elizaLogger9.log("create bucket...");
+    elizaLogger11.log("create bucket...");
     const createBucketTx = await this.gnfdClient.bucket.createBucket(msg);
     const createBucketTxSimulateInfo = await createBucketTx.simulate({
       denom: "BNB"
@@ -12531,9 +12529,9 @@ var GreenfieldAction = class {
       granter: "",
       privateKey: this.walletProvider.getPk()
     });
-    elizaLogger9.log("createBucketTxRes", createBucketTxRes);
+    elizaLogger11.log("createBucketTxRes", createBucketTxRes);
     if (createBucketTxRes.code === 0) {
-      elizaLogger9.log("create bucket success");
+      elizaLogger11.log("create bucket success");
     }
     return createBucketTxRes.transactionHash;
   }
@@ -12550,7 +12548,7 @@ var GreenfieldAction = class {
       }
     );
     if (uploadRes.code === 0) {
-      elizaLogger9.log("upload object success");
+      elizaLogger11.log("upload object success");
     }
     return uploadRes.message;
   }
@@ -12572,7 +12570,7 @@ var GreenfieldAction = class {
       privateKey: this.walletProvider.getPk()
     });
     if (res.code === 0) {
-      elizaLogger9.log("delete success");
+      elizaLogger11.log("delete success");
     }
     return res.transactionHash;
   }
@@ -12581,29 +12579,29 @@ var greenfieldAction = {
   name: "GREENFIELD_ACTION",
   description: "create bucket, upload object, delete object on the greenfield chain",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger9.log("Starting Gnfd action...");
+    elizaLogger11.log("Starting Gnfd action...");
     if (!state) {
       state = await runtime.composeState(message);
     } else {
       state = await runtime.updateRecentMessageState(state);
     }
-    const context = composeContext8({
+    const context = composeContext9({
       state,
       template: greenfieldTemplate
     });
-    const content = await generateObjectDeprecated8({
+    const content = await generateObjectDeprecated9({
       runtime,
       context,
-      modelClass: ModelClass8.LARGE
+      modelClass: ModelClass9.LARGE
     });
-    elizaLogger9.log("content", content);
+    elizaLogger11.log("content", content);
     const config = await getGnfdConfig(runtime);
     const gnfdClient = await InitGnfdClient(runtime);
     const walletProvider = initWalletProvider(runtime);
     const action = new GreenfieldAction(walletProvider, gnfdClient);
     const actionType = content.actionType;
     const spInfo = await action.selectSp();
-    elizaLogger9.log("content", content);
+    elizaLogger11.log("content", content);
     const { bucketName, objectName } = content;
     const attachments = message.content.attachments;
     try {
@@ -12671,7 +12669,7 @@ var greenfieldAction = {
       }
       return true;
     } catch (error) {
-      elizaLogger9.error("Error execute greenfield action:", error.message);
+      elizaLogger11.error("Error execute greenfield action:", error.message);
       callback?.({
         text: `Bridge failed: ${error.message}`,
         content: { error: error.message }
@@ -12728,7 +12726,7 @@ var greenfieldAction = {
 };
 function generateFile(attachment) {
   const filePath = fixPath(attachment.url);
-  elizaLogger9.log("filePath", filePath);
+  elizaLogger11.log("filePath", filePath);
   const stats = statSync(filePath);
   const fileSize = stats.size;
   const name = extname(filePath);
@@ -12761,7 +12759,8 @@ var actions = [
   bridgeAction,
   stakeAction,
   faucetAction,
-  deployAction
+  deployAction,
+  greenfieldAction
 ];
 var BNB_SPLASH = true;
 if (BNB_SPLASH) {
@@ -12833,10 +12832,8 @@ var bnbPlugin = {
   description: "BNB Smart Chain (BSC) and opBNB integration plugin supporting transfers, swaps, staking, bridging, and token deployments",
   providers: [bnbWalletProvider],
   services: [],
-
   actions,
   evaluators: []
-
 };
 var index_default = bnbPlugin;
 export {
