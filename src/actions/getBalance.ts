@@ -122,16 +122,72 @@ export class GetBalanceAction {
     }
 
     async validateAndNormalizeParams(params: GetBalanceParams): Promise<void> {
-        if (!params.address) {
+        try {
+            // If no chain specified, default to BSC
+            if (!params.chain) {
+                params.chain = "bsc";
+            }
+            
+            // If no address provided, use the wallet's own address
+            if (!params.address) {
+                params.address = this.walletProvider.getAddress();
+                elizaLogger.debug(`No address provided, using wallet address: ${params.address}`);
+                return;
+            }
+            
+            // Convert address to string for string comparisons
+            const addressStr = String(params.address);
+            
+            // If address is null or invalid strings, use wallet address
+            if (addressStr === 'null' || addressStr === 'undefined') {
+                params.address = this.walletProvider.getAddress();
+                elizaLogger.debug(`Invalid address string provided, using wallet address: ${params.address}`);
+                return;
+            }
+            
+            // If address already looks like a valid hex address, use it directly
+            if (addressStr.startsWith("0x") && addressStr.length === 42) {
+                elizaLogger.debug(`Using valid hex address: ${params.address}`);
+                return;
+            }
+            
+            // Skip web3 name resolution for common token names that might have been
+            // mistakenly parsed as addresses
+            const commonTokens = ['USDT', 'USDC', 'BNB', 'ETH', 'BUSD', 'WBNB', 'CAKE'];
+            if (commonTokens.includes(addressStr.toUpperCase())) {
+                elizaLogger.debug(`Address looks like a token symbol: ${params.address}, using wallet address instead`);
+                params.address = this.walletProvider.getAddress();
+                return;
+            }
+            
+            // Try to resolve as web3 name
+            elizaLogger.debug(`Attempting to resolve address as Web3Name: ${params.address}`);
+            const resolvedAddress = await this.walletProvider.resolveWeb3Name(params.address);
+            if (resolvedAddress) {
+                elizaLogger.debug(`Resolved Web3Name to address: ${resolvedAddress}`);
+                params.address = resolvedAddress as Address;
+                return;
+            }
+            
+            // If we can't resolve, but it looks like a potential wallet address, try to use it
+            if (addressStr.startsWith("0x")) {
+                elizaLogger.warn(`Address "${params.address}" doesn't look like a standard Ethereum address but will be used as is`);
+                return;
+            }
+            
+            // If we get here, we couldn't parse the address at all
+            // Fall back to the wallet's address
+            elizaLogger.warn(`Could not resolve address: ${params.address}, falling back to wallet address`);
             params.address = this.walletProvider.getAddress();
-        } else {
-            params.address = await this.walletProvider.formatAddress(
-                params.address
-            );
+        } catch (error) {
+            elizaLogger.error(`Error validating address: ${error.message}`);
+            // Fall back to wallet's own address if there's an error
+            params.address = this.walletProvider.getAddress();
         }
     }
 }
 
+// Direct export of the action for use in the main plugin
 export const getBalanceAction = {
     name: "getBalance",
     description: "Get balance of a token or all tokens for the given address",
@@ -191,10 +247,31 @@ export const getBalanceAction = {
             }
             return true;
         } catch (error) {
-            elizaLogger.error("Error during get balance:", error.message);
+            elizaLogger.error("Error during get balance:", error);
+            
+            // Provide more user-friendly error messages based on error type
+            let userMessage = `Get balance failed: ${error.message}`;
+            
+            // Check for common error cases
+            if (error.message.includes("getTldInfo")) {
+                userMessage = `Could not find token "${getBalanceOptions.token}" on ${getBalanceOptions.chain}. Please check the token symbol or address.`;
+            } else if (error.message.includes("No URL was provided")) {
+                userMessage = `Network connection issue. Please try again later.`;
+            } else if (error.message.includes("Only BSC mainnet is supported")) {
+                userMessage = `Only BSC mainnet supports looking up tokens by symbol. Please try using a token address instead.`;
+            } else if (error.message.includes("Invalid address")) {
+                userMessage = `The address provided is invalid. Please provide a valid wallet address.`;
+            } else if (error.message.includes("Cannot read properties")) {
+                userMessage = `There was an issue processing your request. Please check your inputs and try again.`;
+            }
+            
             callback?.({
-                text: `Get balance failed: ${error.message}`,
-                content: { error: error.message },
+                text: userMessage,
+                content: { 
+                    error: error.message,
+                    chain: getBalanceOptions.chain,
+                    token: getBalanceOptions.token
+                },
             });
             return false;
         }
@@ -208,7 +285,7 @@ export const getBalanceAction = {
             {
                 user: "{{user1}}",
                 content: {
-                    text: "Check my balance of USDC",
+                    text: "Check my balance of USDT",
                 },
             },
             {

@@ -23,7 +23,7 @@ import {
     type WalletProvider,
 } from "../providers/wallet";
 import { transferTemplate } from "../templates";
-import type { TransferParams, TransferResponse } from "../types";
+import type { TransferParams, TransferResponse, SupportedChain } from "../types";
 
 export { transferTemplate };
 
@@ -35,28 +35,65 @@ export class TransferAction {
     constructor(private walletProvider: WalletProvider) {}
 
     async transfer(params: TransferParams): Promise<TransferResponse> {
-        elizaLogger.debug("Transfer params:", params);
+        elizaLogger.debug("Starting transfer with params:", JSON.stringify(params, null, 2));
+        
+        // Debug the chain validation
+        elizaLogger.debug(`Chain before validation: ${params.chain}`);
+        elizaLogger.debug(`Available chains:`, Object.keys(this.walletProvider.chains));
+        
+        // Check if the chain is supported
+        if (!this.walletProvider.chains[params.chain]) {
+            elizaLogger.error(`Chain '${params.chain}' is not supported. Available chains: ${Object.keys(this.walletProvider.chains).join(', ')}`);
+            throw new Error(`Chain '${params.chain}' is not supported. Please use one of: ${Object.keys(this.walletProvider.chains).join(', ')}`);
+        }
+        
+        // Handle data parameter - make sure it's not a string "null"
+        // This must happen before validation to avoid type errors
+        let dataParam: Hex | undefined = undefined;
+        if (params.data && typeof params.data === 'string' && params.data.startsWith('0x')) {
+            dataParam = params.data as Hex;
+            elizaLogger.debug(`Using data parameter: ${dataParam}`);
+        } else if (params.data) {
+            elizaLogger.debug(`Ignoring invalid data parameter: ${params.data}`);
+        }
+        
         await this.validateAndNormalizeParams(params);
-        elizaLogger.debug("Normalized transfer params:", params);
+        elizaLogger.debug("After address validation, params:", JSON.stringify(params, null, 2));
 
         const fromAddress = this.walletProvider.getAddress();
+        elizaLogger.debug(`From address: ${fromAddress}`);
 
+        elizaLogger.debug(`Switching to chain: ${params.chain}`);
         this.walletProvider.switchChain(params.chain);
-        const nativeToken =
-            this.walletProvider.chains[params.chain].nativeCurrency.symbol;
+
+        const nativeToken = this.walletProvider.chains[params.chain].nativeCurrency.symbol;
+        elizaLogger.debug(`Native token for chain ${params.chain}: ${nativeToken}`);
+
+        // CRITICAL: Ensure token is never null before proceeding
+        if (!params.token) {
+            params.token = nativeToken;
+            elizaLogger.debug(`Setting null token to native token: ${nativeToken}`);
+        } else if (params.token.toLowerCase() === nativeToken.toLowerCase()) {
+            // Standardize the token case if it matches the native token
+            params.token = nativeToken;
+            elizaLogger.debug(`Standardized token case to match native token: ${nativeToken}`);
+        }
+        
+        elizaLogger.debug(`Final transfer token: ${params.token}`);
+
         const resp: TransferResponse = {
             chain: params.chain,
             txHash: "0x",
             recipient: params.toAddress,
             amount: "",
-            token: params.token ?? nativeToken,
+            token: params.token,
         };
 
         if (!params.token || params.token =="null" || params.token === nativeToken) {
             elizaLogger.debug("Native token transfer:", nativeToken);
             // Native token transfer
             const options: { gas?: bigint; gasPrice?: bigint; data?: Hex } = {
-                data: params.data,
+                data: dataParam,
             };
             let value: bigint;
             if (!params.amount) {
@@ -86,12 +123,76 @@ export class TransferAction {
             // ERC20 token transfer
             elizaLogger.debug("ERC20 token transfer");
             let tokenAddress = params.token;
-            if (!params.token.startsWith("0x")) {
-                tokenAddress = await this.walletProvider.getTokenAddress(
+            elizaLogger.debug(`Token before address resolution: ${params.token}`);
+            
+            // Special case: If token is BNB (the native token), handle it separately
+            // This avoids the LI.FI lookup which fails with null token
+            if (params.token === "BNB" || params.token === "bnb") {
+                elizaLogger.debug(`Detected native token (BNB) passed to ERC20 handling branch - switching to native token handling`);
+                
+                // Update response token to make sure it's consistent
+                resp.token = nativeToken;
+                
+                // Switch to native token transfer
+                const options: { gas?: bigint; gasPrice?: bigint; data?: Hex } = {
+                    data: dataParam,
+                };
+                let value: bigint;
+                if (!params.amount) {
+                    // Transfer all balance minus gas
+                    const publicClient = this.walletProvider.getPublicClient(
+                        params.chain
+                    );
+                    const balance = await publicClient.getBalance({
+                        address: fromAddress,
+                    });
+
+                    value = balance - this.DEFAULT_GAS_PRICE * 21000n;
+                    options.gas = this.TRANSFER_GAS;
+                    options.gasPrice = this.DEFAULT_GAS_PRICE;
+                } else {
+                    value = parseEther(params.amount);
+                }
+
+                resp.amount = formatEther(value);
+                resp.txHash = await this.walletProvider.transfer(
                     params.chain,
-                    params.token
+                    params.toAddress,
+                    value,
+                    options
                 );
+                
+                // Skip remaining ERC20 handling
+                elizaLogger.debug(`Native BNB transfer completed via transfer branch`);
+                return resp; // Return early to skip the rest of the ERC20 handling
+                
+            } else if (!params.token.startsWith("0x")) {
+                try {
+                    elizaLogger.debug(`Attempting to resolve token symbol: ${params.token} on chain ${params.chain}`);
+                    // Configure the LI.FI SDK for token lookup
+                    this.walletProvider.configureLiFiSdk(params.chain);
+                    
+                    tokenAddress = await this.walletProvider.getTokenAddress(
+                        params.chain,
+                        params.token
+                    );
+                    
+                    elizaLogger.debug(`Resolved token address: ${tokenAddress} for ${params.token}`);
+                    
+                    // If token address doesn't start with 0x after resolution, it might have failed
+                    if (!tokenAddress || !tokenAddress.startsWith("0x")) {
+                        elizaLogger.error(`Failed to resolve token to proper address: ${tokenAddress}`);
+                        throw new Error(`Could not resolve token symbol ${params.token} to a valid address`);
+                    }
+                } catch (error) {
+                    elizaLogger.error(`Error resolving token address for ${params.token}:`, error);
+                    throw new Error(`Could not find token ${params.token} on chain ${params.chain}. Please check the token symbol or use the contract address.`);
+                }
+            } else {
+                elizaLogger.debug(`Using token address directly: ${tokenAddress}`);
             }
+            
+            elizaLogger.debug(`Final token address for ERC20 transfer: ${tokenAddress}`);
 
             const publicClient = this.walletProvider.getPublicClient(
                 params.chain
@@ -161,6 +262,42 @@ export const transferAction = {
         callback?: HandlerCallback
     ) => {
         elizaLogger.log("Starting transfer action...");
+        elizaLogger.debug("Message content:", JSON.stringify(message.content, null, 2));
+
+        // Extract prompt text if available to help with token detection
+        const promptText = typeof message.content.text === 'string' ? message.content.text.trim() : '';
+        elizaLogger.debug(`Raw prompt text: "${promptText}"`);
+        
+        // Pre-analyze the prompt for token indicators - more aggressive token detection
+        const promptLower = promptText.toLowerCase();
+        
+        // Direct BNB token detection - look for explicit mentions of BNB
+        const containsBnb = promptLower.includes('bnb') || 
+                            promptLower.includes('binance coin') || 
+                            promptLower.includes('binance smart chain');
+        
+        // Direct token detection from prompt format like "Transfer 0.0001 BNB to 0x123..."
+        let directTokenMatch: string | null = null;
+        const transferRegex = /transfer\s+([0-9.]+)\s+([a-zA-Z0-9]+)\s+to\s+(0x[a-fA-F0-9]{40})/i;
+        const match = promptText.match(transferRegex);
+        
+        if (match && match.length >= 3) {
+            const [_, amount, tokenSymbol, toAddress] = match;
+            directTokenMatch = tokenSymbol.toUpperCase();
+            elizaLogger.debug(`Directly extracted from prompt - Amount: ${amount}, Token: ${directTokenMatch}, To: ${toAddress}`);
+        }
+        
+        if (containsBnb) {
+            elizaLogger.debug(`BNB transfer detected in prompt text: "${promptText}"`);
+        }
+        
+        // Store this information for later use
+        const promptAnalysis = {
+            containsBnb,
+            directTokenMatch
+        };
+        
+        elizaLogger.debug("Prompt analysis result:", promptAnalysis);
 
         // Validate transfer
         if (!(message.content.source === "direct")) {
@@ -178,11 +315,24 @@ export const transferAction = {
         } else {
             currentState = await runtime.updateRecentMessageState(currentState);
         }
-        state.walletInfo = await bnbWalletProvider.get(
-            runtime,
-            message,
-            currentState
-        );
+        
+        try {
+            state.walletInfo = await bnbWalletProvider.get(
+                runtime,
+                message,
+                currentState
+            );
+            elizaLogger.debug("Wallet info:", state.walletInfo);
+        } catch (error) {
+            elizaLogger.error("Error getting wallet info:", error.message);
+        }
+
+        // Log available settings
+        elizaLogger.debug("Available runtime settings:");
+        const bscProviderUrl = runtime.getSetting("BSC_PROVIDER_URL");
+        const bscTestnetProviderUrl = runtime.getSetting("BSC_TESTNET_PROVIDER_URL");
+        elizaLogger.debug(`BSC_PROVIDER_URL: ${bscProviderUrl ? "set" : "not set"}`);
+        elizaLogger.debug(`BSC_TESTNET_PROVIDER_URL: ${bscTestnetProviderUrl ? "set" : "not set"}`);
 
         // Compose transfer context
         const transferContext = composeContext({
@@ -194,17 +344,81 @@ export const transferAction = {
             context: transferContext,
             modelClass: ModelClass.LARGE,
         });
+        
+        elizaLogger.debug("Generated transfer content:", JSON.stringify(content, null, 2));
+        
+        // Normalize chain from content
+        let chain = content.chain?.toLowerCase() || "bsc";
+        elizaLogger.debug(`Chain parameter: ${chain}`);
+        
+        // Check if content has a token field
+        elizaLogger.debug("Token from content:", content.token);
+        elizaLogger.debug("Content object keys:", Object.keys(content));
+
+        // PRIORITY ORDER FOR TOKEN DETERMINATION:
+        // 1. Direct match from prompt text (most reliable)
+        // 2. Token specified in model-generated content
+        // 3. BNB detection from prompt analysis
+        // 4. Default to BNB (native token)
+        
+        let token: string;
+        
+        // 1. First priority: Use directly extracted token from prompt if available
+        if (directTokenMatch) {
+            token = directTokenMatch;
+            elizaLogger.debug(`Using token directly extracted from prompt: ${token}`);
+        }
+        // 2. Second priority: Use token from content if available
+        else if (content.token) {
+            token = content.token;
+            elizaLogger.debug(`Using token from generated content: ${token}`);
+        }
+        // 3. Third priority: Detected BNB in prompt
+        else if (containsBnb) {
+            token = "BNB";
+            elizaLogger.debug(`Using BNB as detected in prompt`);
+        }
+        // 4. Default fallback
+        else {
+            token = "BNB"; // Default to native token
+            elizaLogger.debug(`No token detected, defaulting to native token BNB`);
+        }
+        
+        // Final validation - never allow null/undefined as token value
+        if (!token) {
+            token = "BNB";
+            elizaLogger.debug(`Final safeguard: ensuring token is not null/undefined`);
+        }
+        
+        elizaLogger.debug(`Final token parameter: ${token}`);
 
         const walletProvider = initWalletProvider(runtime);
         const action = new TransferAction(walletProvider);
+        
+        // Process data field to avoid passing "null" string
+        let dataParam: Hex | undefined = undefined;
+        if (content.data && typeof content.data === 'string') {
+            if (content.data.startsWith('0x') && content.data !== '0x') {
+                dataParam = content.data as Hex;
+                elizaLogger.debug(`Using valid hex data: ${dataParam}`);
+            } else {
+                elizaLogger.debug(`Invalid data format or value: ${content.data}, ignoring`);
+            }
+        }
+        
         const paramOptions: TransferParams = {
-            chain: content.chain,
-            token: content.token,
+            chain: chain as SupportedChain,
+            token: token,
             amount: content.amount,
             toAddress: content.toAddress,
-            data: content.data,
+            data: dataParam,
         };
+        
+        elizaLogger.debug("Transfer params before action:", JSON.stringify(paramOptions, null, 2));
+
         try {
+            elizaLogger.debug("Calling transfer with params:", JSON.stringify(paramOptions, null, 2));
+            
             const transferResp = await action.transfer(paramOptions);
             callback?.({
                 text: `Successfully transferred ${transferResp.amount} ${transferResp.token} to ${transferResp.recipient}\nTransaction Hash: ${transferResp.txHash}`,
@@ -214,9 +428,60 @@ export const transferAction = {
             return true;
         } catch (error) {
             elizaLogger.error("Error during transfer:", error.message);
+            
+            // Log the entire error object for diagnosis
+            try {
+                elizaLogger.error("Full error details:", JSON.stringify(error, null, 2));
+            } catch (e) {
+                elizaLogger.error("Error object not serializable, logging properties individually:");
+                for (const key in error) {
+                    try {
+                        elizaLogger.error(`${key}:`, error[key]);
+                    } catch (e) {
+                        elizaLogger.error(`${key}: [Error serializing property]`);
+                    }
+                }
+            }
+            
+            // Enhanced error diagnosis
+            let errorMessage = error.message;
+            
+            // Check for LI.FI SDK errors
+            if (error.message.includes("LI.FI SDK")) {
+                elizaLogger.error("LI.FI SDK error detected");
+                
+                if (error.message.includes("Request failed with status code 404") && 
+                    error.message.includes("Could not find token")) {
+                    // Extract the token that couldn't be found from the error message
+                    const tokenMatch = error.message.match(/Could not find token (.*?) on chain/);
+                    const tokenValue = tokenMatch ? tokenMatch[1] : paramOptions.token;
+                    
+                    errorMessage = `Could not find the token '${tokenValue}' on ${paramOptions.chain}. 
+                    Please check the token symbol or address and try again.`;
+                    
+                    elizaLogger.error(`Token not found: ${tokenValue}`);
+                    elizaLogger.debug(`Original token from params: ${paramOptions.token}`);
+                    
+                    // Suggest a solution
+                    if (tokenValue === "null" || tokenValue === "undefined" || !tokenValue) {
+                        errorMessage += " For BNB transfers, please explicitly specify 'BNB' as the token.";
+                    }
+                } else if (error.message.includes("400 Bad Request") && error.message.includes("chain must be")) {
+                    errorMessage = `Chain validation error: '${paramOptions.chain}' is not a valid chain for the LI.FI SDK. 
+                    Please use 'bsc' for BSC mainnet.`;
+                }
+            }
+            
+            // Check for other common errors
+            if (error.message.includes("insufficient funds")) {
+                errorMessage = `Insufficient funds for the transaction. Please check your balance and try again with a smaller amount.`;
+            } else if (error.message.includes("transaction underpriced")) {
+                errorMessage = `Transaction underpriced. Please try again with a higher gas price.`;
+            }
+            
             callback?.({
-                text: `Transfer failed: ${error.message}`,
-                content: { error: error.message },
+                text: `Transfer failed: ${errorMessage}`,
+                content: { error: errorMessage },
             });
             return false;
         }
@@ -231,19 +496,19 @@ export const transferAction = {
             {
                 user: "{{user1}}",
                 content: {
-                    text: "Transfer 1 BNB to 0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+                    text: "Transfer 0.001 BNB to 0x2CE4EaF47CACFbC6590686f8f7521e0385822334",
                 },
             },
             {
                 user: "{{agent}}",
                 content: {
-                    text: "I'll help you transfer 1 BNB to 0x742d35Cc6634C0532925a3b844Bc454e4438f44e on BSC",
+                    text: "I'll help you transfer 0.001 BNB to 0x2CE4EaF47CACFbC6590686f8f7521e0385822334 on BSC",
                     action: "TRANSFER",
                     content: {
                         chain: "bsc",
                         token: "BNB",
                         amount: "1",
-                        toAddress: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+                        toAddress: "0x2CE4EaF47CACFbC6590686f8f7521e0385822334",
                     },
                 },
             },

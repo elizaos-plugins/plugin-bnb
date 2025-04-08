@@ -25,6 +25,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import * as viemChains from "viem/chains";
 import { createWeb3Name } from "@web3-name-sdk/core";
+import { elizaLogger } from "@elizaos/core";
 
 import type { SupportedChain } from "../types";
 
@@ -110,25 +111,122 @@ export class WalletProvider {
         });
     }
 
-    async formatAddress(address: string): Promise<Address> {
-        if (!address || address.length === 0) {
-            throw new Error("Empty address");
+    async formatAddress(address: string | null | undefined): Promise<Address> {
+        // If address is null or undefined, use the wallet's own address
+        if (address === null || address === undefined) {
+            elizaLogger.debug("Address is null or undefined, using wallet's own address");
+            return this.getAddress();
         }
 
-        if (address.startsWith("0x") && address.length === 42) {
-            return address as Address;
+        // If address is empty string, use wallet's own address
+        if (typeof address === 'string' && address.trim().length === 0) {
+            elizaLogger.debug("Address is empty string, using wallet's own address");
+            return this.getAddress();
         }
 
-        const resolvedAddress = await this.resolveWeb3Name(address);
-        if (resolvedAddress) {
-            return resolvedAddress as Address;
+        // Convert to string in case we get an object or other type
+        const addressStr = String(address).trim();
+        
+        // If it's already a valid hex address, return it directly
+        if (addressStr.startsWith("0x") && addressStr.length === 42) {
+            elizaLogger.debug(`Using valid hex address: ${addressStr}`);
+            return addressStr as Address;
         }
-        throw new Error("Invalid address");
+        
+        // Skip web3 name resolution for common tokens that might be mistakenly
+        // passed as addresses
+        const commonTokens = ['USDT', 'USDC', 'BNB', 'ETC', 'WETC', 'BUSD', 'WBNB', 'TRON', 'LINK', 'OM', 'UNI', 'PEPE', 'AAVE', 'ATOM'];
+        if (commonTokens.includes(addressStr.toUpperCase())) {
+            elizaLogger.debug(`Value appears to be a token symbol, not an address: ${addressStr}. Using wallet's own address.`);
+            return this.getAddress();
+        }
+
+        // Try to resolve as web3 name
+        try {
+            elizaLogger.debug(`Attempting to resolve as Web3Name: ${addressStr}`);
+            const resolvedAddress = await this.resolveWeb3Name(addressStr);
+            if (resolvedAddress) {
+                elizaLogger.debug(`Resolved Web3Name to address: ${resolvedAddress}`);
+                return resolvedAddress as Address;
+            }
+        } catch (error) {
+            elizaLogger.debug(`Failed to resolve Web3Name '${addressStr}': ${error.message}. Will try other methods.`);
+            // Continue to other methods rather than throwing
+        }
+        
+        // If we can't resolve the name but it looks like a potential address
+        if (addressStr.startsWith("0x")) {
+            elizaLogger.debug(`Address "${addressStr}" doesn't look like a standard Ethereum address but will be used as is`);
+            return addressStr as Address;
+        }
+        
+        // If all else fails, use the wallet's own address
+        elizaLogger.debug(`Could not resolve address '${addressStr}'. Using wallet's own address.`);
+        return this.getAddress();
     }
 
-    async resolveWeb3Name(name: string): Promise<string | null> {
-        const nameService = createWeb3Name();
-        return await nameService.getAddress(name);
+    async resolveWeb3Name(name: string | null | undefined): Promise<string | null> {
+        // Handle null/undefined/empty cases
+        if (name === null || name === undefined || name === 'null') {
+            elizaLogger.debug(`Web3Name resolution skipped for null/undefined value`);
+            return null;
+        }
+        
+        // Convert to string and trim
+        const nameStr = String(name).trim();
+        if (nameStr.length === 0) {
+            elizaLogger.debug(`Web3Name resolution skipped for empty string`);
+            return null;
+        }
+        
+        // If it's already a valid address, return it directly
+        if (nameStr.startsWith('0x') && nameStr.length === 42) {
+            elizaLogger.debug(`Value is already a valid address: ${nameStr}`);
+            return nameStr;
+        }
+        
+        // Skip resolution for common token symbols and keywords
+        const commonTokens = ['USDT', 'USDC', 'BNB', 'ETH', 'BTC', 'BUSD', 'DAI', 'WETC', 'WBNB', 'TRON', 'LINK', 'OM', 'UNI', 'PEPE', 'AAVE', 'ATOM'];
+        if (commonTokens.includes(nameStr.toUpperCase())) {
+            elizaLogger.debug(`Skipping Web3Name resolution for common token: ${nameStr}`);
+            return null;
+        }
+        
+        try {
+            // Get the current chain's RPC URL to use for name resolution
+            const chain = this.getCurrentChain();
+            const rpcUrl = chain.rpcUrls.custom?.http[0] || chain.rpcUrls.default.http[0];
+            
+            elizaLogger.debug(`Resolving Web3Name: ${nameStr} using chain ${chain.name} and RPC: ${rpcUrl}`);
+            
+            // Create nameService with explicit RPC URL
+            const nameService = createWeb3Name({
+                rpcUrl
+            });
+            
+            // Attempt resolution with timeout
+            const result = await Promise.race([
+                nameService.getAddress(nameStr),
+                new Promise<null>((resolve) => 
+                    setTimeout(() => {
+                        elizaLogger.debug(`Web3Name resolution timeout for ${nameStr}`);
+                        resolve(null);
+                    }, 5000) // 5 second timeout
+                )
+            ]);
+            
+            if (result) {
+                elizaLogger.debug(`Web3Name resolved: ${nameStr} → ${result}`);
+                return result;
+            } else {
+                elizaLogger.debug(`Web3Name not resolved: ${nameStr}`);
+                return null;
+            }
+        } catch (error) {
+            // Log error but don't propagate it - maintain smooth user experience
+            elizaLogger.debug(`Error resolving Web3Name ${nameStr}: ${error.message}`);
+            return null;
+        }
     }
 
     async checkERC20Allowance(
@@ -228,6 +326,34 @@ export class WalletProvider {
         return token.address;
     }
 
+    /**
+     * Gets testnet token address from predefined mapping
+     * This is a custom method for testnet tokens since the regular token lookup
+     * doesn't work on testnets.
+     */
+    getTestnetTokenAddress(tokenSymbol: string): string | null {
+        // Testnet token mapping - keep in sync with the mapping in getBalanceTestnet.ts
+        const TESTNET_TOKEN_ADDRESSES: Record<string, string> = {
+            "BNB": "0x64544969ed7EBf5f083679233325356EbE738930",
+            "BUSD": "0x48D87A2d14De41E2308A764905B93E05c9377cE1",
+            "DAI": "0x46B48c1Ef4B5F15B7DdC415290CEC2f774cD1021",
+            "ETH": "0x635780E5D02Ab29d7aE14d266936A38d3D5B0CC5",
+            "USDC": "0x053Fc65249dF91a02Ddb294A081f774615aB45F4",
+        };
+
+        // Normalize input to uppercase
+        const normalizedSymbol = tokenSymbol.toUpperCase();
+        
+        // Check if token exists in mapping
+        if (TESTNET_TOKEN_ADDRESSES[normalizedSymbol]) {
+            elizaLogger.debug(`Found testnet token address for ${normalizedSymbol}: ${TESTNET_TOKEN_ADDRESSES[normalizedSymbol]}`);
+            return TESTNET_TOKEN_ADDRESSES[normalizedSymbol];
+        }
+        
+        elizaLogger.debug(`No testnet address found for token ${normalizedSymbol}`);
+        return null;
+    }
+
     addChain(chain: Record<string, Chain>) {
         this.setChains(chain);
     }
@@ -310,6 +436,12 @@ const genChainsFromRuntime = (
     if (mainnet_rpcurl) {
         const chain = WalletProvider.genChainFromName("bsc", mainnet_rpcurl);
         chains["bsc"] = chain;
+    }
+    
+    const testnet_rpcurl = runtime.getSetting("BSC_TESTNET_PROVIDER_URL");
+    if (testnet_rpcurl) {
+        const chain = WalletProvider.genChainFromName("bscTestnet", testnet_rpcurl);
+        chains["bscTestnet"] = chain;
     }
 
     const opbnb_rpcurl = runtime.getSetting("OPBNB_PROVIDER_URL");
