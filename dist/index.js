@@ -25,7 +25,9 @@ var WalletProvider = class _WalletProvider {
   currentChain = "bsc";
   chains = { bsc: viemChains.bsc };
   account;
+  privateKey;
   constructor(privateKey, chains) {
+    this.privateKey = privateKey;
     this.setAccount(privateKey);
     this.setChains(chains);
     if (chains && Object.keys(chains).length > 0) {
@@ -34,6 +36,9 @@ var WalletProvider = class _WalletProvider {
   }
   getAccount() {
     return this.account;
+  }
+  getPk() {
+    return this.privateKey;
   }
   getAddress() {
     return this.account.address;
@@ -533,13 +538,14 @@ var greenfieldTemplate = `Given the recent messages and wallet information below
 {{walletInfo}}
 
 Extract the following details for Greenfield operations:
-- **actionType** (string): The type of operation to perform (e.g., "createBucket", "uploadObject", "deleteObject", "crossChainTransfer")
-- **bucketName** (string, optional): The name of the bucket to operate
-- **objectName** (string, optional): The name of the object for upload operations
-- **visibility** (string, optional): Bucket visibility setting ("private" or "public")
-- **amount** (string, optional): BNB transfer to greenfield token amount.
+- The type of operation to perform (e.g., "createBucket", "uploadObject", "deleteObject", "crossChainTransfer")
+- The name of the bucket to operate
+- The name of the object for upload operations
+- Bucket visibility setting ("private" or "public")
+- BNB transfer to greenfield token amount.
 
-Required response format:
+Required Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:
+
 \`\`\`json
 {
     "actionType": "createBucket" | "uploadObject" | "deleteObject" | "crossChainTransfer",
@@ -12472,8 +12478,18 @@ var GreenfieldAction = class {
     const sps = await this.gnfdClient.sp.getStorageProviders();
     return sps;
   }
-  async selectSp() {
-    const finalSps = await this.getSps();
+  async selectSp(runtime) {
+    let finalSps = await this.getSps();
+    const config = await getGnfdConfig(runtime);
+    if (config.NETWORK === "TESTNET") {
+      const filteredSps = finalSps.filter(
+        (sp) => sp.endpoint.includes("nodereal") || sp.endpoint.includes("bnbchain")
+      );
+      if (filteredSps.length === 0) {
+        throw new Error("No storage providers available with the required endpoints");
+      }
+      finalSps = filteredSps;
+    }
     const selectIndex = Math.floor(Math.random() * finalSps.length);
     const secondarySpAddresses = [
       ...finalSps.slice(0, selectIndex),
@@ -12540,6 +12556,7 @@ var GreenfieldAction = class {
     return bucketInfo.id;
   }
   async uploadObject(msg) {
+    elizaLogger11.log("start uploadObject action");
     const uploadRes = await this.gnfdClient.object.delegateUploadObject(
       msg,
       {
@@ -12580,10 +12597,11 @@ var greenfieldAction = {
   description: "create bucket, upload object, delete object on the greenfield chain",
   handler: async (runtime, message, state, _options, callback) => {
     elizaLogger11.log("Starting Gnfd action...");
-    if (!state) {
-      state = await runtime.composeState(message);
+    let currentState = state;
+    if (!currentState) {
+      currentState = await runtime.composeState(message);
     } else {
-      state = await runtime.updateRecentMessageState(state);
+      currentState = await runtime.updateRecentMessageState(currentState);
     }
     const context = composeContext9({
       state,
@@ -12600,8 +12618,9 @@ var greenfieldAction = {
     const walletProvider = initWalletProvider(runtime);
     const action = new GreenfieldAction(walletProvider, gnfdClient);
     const actionType = content.actionType;
-    const spInfo = await action.selectSp();
-    elizaLogger11.log("content", content);
+    const spInfo = await action.selectSp(runtime);
+    elizaLogger11.log("action.selectSp()", spInfo);
+    elizaLogger11.log("GREENFIELD_ACTION content", content);
     const { bucketName, objectName } = content;
     const attachments = message.content.attachments;
     try {
@@ -12626,7 +12645,7 @@ var greenfieldAction = {
             throw new Error("no file to upload");
           }
           const uploadObjName = objectName;
-          await action.uploadObject({
+          var uploadMsg = await action.uploadObject({
             bucketName,
             objectName: uploadObjName,
             body: generateFile(attachments[0]),
@@ -12634,6 +12653,7 @@ var greenfieldAction = {
               visibility: VisibilityType.VISIBILITY_TYPE_PUBLIC_READ
             }
           });
+          elizaLogger11.log("uploadObject result", uploadMsg);
           const objectId = await action.headObject(bucketName, objectName);
           if (attachments.length > 1) {
             result += `Only one object can be uploaded. 

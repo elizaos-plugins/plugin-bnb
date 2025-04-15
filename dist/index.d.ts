@@ -2472,8 +2472,10 @@ declare class WalletProvider {
     private currentChain;
     chains: Record<string, Chain>;
     account: PrivateKeyAccount;
+    private privateKey;
     constructor(privateKey: `0x${string}`, chains?: Record<string, Chain>);
     getAccount(): PrivateKeyAccount;
+    getPk(): `0x${string}`;
     getAddress(): Address;
     getCurrentChain(): Chain;
     getPublicClient(chainName: SupportedChain): PublicClient<HttpTransport, Chain, Account | undefined>;
