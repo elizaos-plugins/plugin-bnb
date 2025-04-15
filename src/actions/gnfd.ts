@@ -47,8 +47,24 @@ export class GreenfieldAction {
         return sps;
     }
 
-    async selectSp() {
-        const finalSps = await this.getSps();
+    async selectSp(runtime: IAgentRuntime) {
+        let finalSps = await this.getSps();
+        const config = await getGnfdConfig(runtime)
+
+        if (config.NETWORK === 'TESTNET') {
+            // Filter SPs to only those containing "nodereal" or "bnbchain" in endpoint
+            const filteredSps = finalSps.filter(sp =>
+                sp.endpoint.includes("nodereal") ||
+                sp.endpoint.includes("bnbchain") 
+            );
+
+            // If no matching SPs found, you might want to handle this case
+            if (filteredSps.length === 0) {
+                throw new Error("No storage providers available with the required endpoints");
+            }
+            finalSps = filteredSps
+        }
+
 
         const selectIndex = Math.floor(Math.random() * finalSps.length);
 
@@ -214,7 +230,7 @@ export const greenfieldAction = {
         const action = new GreenfieldAction(walletProvider, gnfdClient);
 
         const actionType = content.actionType;
-        const spInfo = await action.selectSp();
+        const spInfo = await action.selectSp(runtime);
         elizaLogger.log('action.selectSp()', spInfo)
 
         elizaLogger.log('GREENFIELD_ACTION content', content)

@@ -12478,8 +12478,18 @@ var GreenfieldAction = class {
     const sps = await this.gnfdClient.sp.getStorageProviders();
     return sps;
   }
-  async selectSp() {
-    const finalSps = await this.getSps();
+  async selectSp(runtime) {
+    let finalSps = await this.getSps();
+    const config = await getGnfdConfig(runtime);
+    if (config.NETWORK === "TESTNET") {
+      const filteredSps = finalSps.filter(
+        (sp) => sp.endpoint.includes("nodereal") || sp.endpoint.includes("bnbchain")
+      );
+      if (filteredSps.length === 0) {
+        throw new Error("No storage providers available with the required endpoints");
+      }
+      finalSps = filteredSps;
+    }
     const selectIndex = Math.floor(Math.random() * finalSps.length);
     const secondarySpAddresses = [
       ...finalSps.slice(0, selectIndex),
@@ -12608,7 +12618,7 @@ var greenfieldAction = {
     const walletProvider = initWalletProvider(runtime);
     const action = new GreenfieldAction(walletProvider, gnfdClient);
     const actionType = content.actionType;
-    const spInfo = await action.selectSp();
+    const spInfo = await action.selectSp(runtime);
     elizaLogger11.log("action.selectSp()", spInfo);
     elizaLogger11.log("GREENFIELD_ACTION content", content);
     const { bucketName, objectName } = content;
