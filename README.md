@@ -142,6 +142,32 @@ The faucet is rate-limited. One claim is allowed per IP address within a 24-hour
 Get some testnet USDC from the faucet.
 ```
 
+
+### Greenfield
+
+Support greenfield chain actions
+
+- **createBucket**
+- **uploadObject**
+- **deleteObject**
+- **crossChainTransfer**
+
+**Example usage:**
+
+- `create a bucket on greenfield TESTNET, and the name is test-eliza-2`
+
+- `upload the attachment as an object to the greenfield, the bucket is "test-eliza-1" and object name is "test.png"`
+
+- `delete object test.png from bucket "test-eliza-1" on Greenfield Testnet`
+
+- `crossChainTransfer 0.01 bnb from BSC testnet to Greenfield Testnet`
+```
+
+
+
+
+
+
 ---
 
 ## Contribution
