@@ -10,15 +10,13 @@ Extract the following information about the requested check balance:
 - Token symbol or address. Could be a token symbol or address. If the address is provided, it must be a valid Ethereum address starting with "0x". Default is "BNB".
 If any field is not provided, use the default value. If no default value is specified, use null.
 
-Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:
+Respond with an XML block containing only the extracted values. Use key-value pairs:
 
-\`\`\`json
-{
-    "chain": SUPPORTED_CHAINS,
-    "address": string | null,
-    "token": string
-}
-\`\`\`
+<response>
+    <chain>SUPPORTED_CHAINS</chain>
+    <address>string or null</address>
+    <token>string</token>
+</response>
 `;
 
 export const transferTemplate = `Given the recent messages and wallet information below:
@@ -35,17 +33,15 @@ Extract the following information about the requested transfer:
 - Data. Optional, data to be included in the transaction.
 If any field is not provided, use the default value. If no default value is specified, use null.
 
-Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:
+Respond with an XML block containing only the extracted values:
 
-\`\`\`json
-{
-    "chain": SUPPORTED_CHAINS,
-    "token": string | null,
-    "amount": string | null,
-    "toAddress": string,
-    "data": string | null
-}
-\`\`\`
+<response>
+    <chain>SUPPORTED_CHAINS</chain>
+    <token>string or null</token>
+    <amount>string or null</amount>
+    <toAddress>string</toAddress>
+    <data>string or null</data>
+</response>
 `;
 
 export const swapTemplate = `Given the recent messages and wallet information below:
@@ -62,17 +58,15 @@ Extract the following information about the requested token swap:
 - Slippage. Optional, expressed as decimal proportion, 0.03 represents 3%.
 If any field is not provided, use the default value. If no default value is specified, use null.
 
-Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:
+Respond with an XML block containing only the extracted values:
 
-\`\`\`json
-{
-    "chain": SUPPORTED_CHAINS,
-    "inputToken": string | null,
-    "outputToken": string | null,
-    "amount": string | null,
-    "slippage": number | null
-}
-\`\`\`
+<response>
+    <chain>SUPPORTED_CHAINS</chain>
+    <inputToken>string or null</inputToken>
+    <outputToken>string or null</outputToken>
+    <amount>string or null</amount>
+    <slippage>number or null</slippage>
+</response>
 `;
 
 export const bridgeTemplate = `Given the recent messages and wallet information below:
@@ -89,18 +83,16 @@ Extract the following information about the requested token bridge:
 - Amount to bridge. Must be a string representing the amount in ether (only number without coin symbol, e.g., "0.1").
 - To address. Optional, must be a valid Ethereum address starting with "0x" or a web3 domain name.
 
-Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:
+Respond with an XML block containing only the extracted values:
 
-\`\`\`json
-{
-    "fromChain": "bsc" | "opBNB",
-    "toChain": "bsc" | "opBNB",
-    "fromToken": string | null,
-    "toToken": string | null,
-    "amount": string,
-    "toAddress": string | null
-}
-\`\`\`
+<response>
+    <fromChain>bsc or opBNB</fromChain>
+    <toChain>bsc or opBNB</toChain>
+    <fromToken>string or null</fromToken>
+    <toToken>string or null</toToken>
+    <amount>string</amount>
+    <toAddress>string or null</toAddress>
+</response>
 `;
 
 export const stakeTemplate = `Given the recent messages and wallet information below:
@@ -115,15 +107,13 @@ Extract the following information about the requested stake action:
 - Amount to execute. Optional, must be a string representing the amount in ether (only number without coin symbol, e.g., "0.1"). If the action is "deposit" or "withdraw", amount is required.
 If any field is not provided, use the default value. If no default value is specified, use null.
 
-Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:
+Respond with an XML block containing only the extracted values:
 
-\`\`\`json
-{
-    "chain": SUPPORTED_CHAINS,
-    "action": "deposit" | "withdraw" | "claim",
-    "amount": string | null,
-}
-\`\`\`
+<response>
+    <chain>SUPPORTED_CHAINS</chain>
+    <action>deposit or withdraw or claim</action>
+    <amount>string or null</amount>
+</response>
 `;
 
 export const faucetTemplate = `Given the recent messages and wallet information below:
@@ -137,14 +127,12 @@ Extract the following information about the requested faucet request:
 - Recipient address. Optional, must be a valid Ethereum address starting with "0x" or a web3 domain name. If not provided, use the BNB chain Wallet Address.
 If any field is not provided, use the default value. If no default value is specified, use null.
 
-Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:
+Respond with an XML block containing only the extracted values:
 
-\`\`\`json
-{
-    "token": string | null,
-    "toAddress": string | null
-}
-\`\`\`
+<response>
+    <token>string or null</token>
+    <toAddress>string or null</toAddress>
+</response>
 `;
 
 export const ercContractTemplate = `Given the recent messages and wallet information below:
@@ -168,19 +156,17 @@ Extract the following details for deploying a token contract:
 - baseURI: Base URI for token metadata (only for ERC721/1155).
 If any field is not provided, use the default value. If no default value is provided, use empty string.
 
-Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined:
+Respond with an XML block containing only the extracted values:
 
-\`\`\`json
-{
-    "chain": SUPPORTED_CHAINS,
-    "contractType": "ERC20" | "ERC721" | "ERC1155",
-    "name": string,
-    "symbol": string | null,
-    "decimals": number | null,
-    "totalSupply": string | null,
-    "baseURI": string | null
-}
-\`\`\`
+<response>
+    <chain>SUPPORTED_CHAINS</chain>
+    <contractType>ERC20 or ERC721 or ERC1155</contractType>
+    <name>string</name>
+    <symbol>string or null</symbol>
+    <decimals>number or null</decimals>
+    <totalSupply>string or null</totalSupply>
+    <baseURI>string or null</baseURI>
+</response>
 `;
 
 export const greenfieldTemplate = `Given the recent messages and wallet information below(only including 'Greenfield' keyword):
@@ -196,14 +182,13 @@ Extract the following details for Greenfield operations:
 - **visibility** (string, optional): Bucket visibility setting ("private" or "public")
 - **amount** (string, optional): BNB transfer to greenfield token amount.
 
-Required response format:
-\`\`\`json
-{
-    "actionType": "createBucket" | "uploadObject" | "deleteObject" | "crossChainTransfer",
-    "bucketName": string,
-    "objectName": string,
-    "visibility": "private" | "public",
-    "amount": number
-}
-\`\`\`
+Respond with an XML block containing only the extracted values:
+
+<response>
+    <actionType>createBucket or uploadObject or deleteObject or crossChainTransfer</actionType>
+    <bucketName>string</bucketName>
+    <objectName>string</objectName>
+    <visibility>private or public</visibility>
+    <amount>number</amount>
+</response>
 `;

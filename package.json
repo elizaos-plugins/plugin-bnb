@@ -1,72 +1,112 @@
 {
     "name": "@elizaos/plugin-bnb",
-    "version": "0.1.9",
+    "version": "1.0.0",
+    "description": "BNB Smart Chain (BSC) and opBNB integration plugin for ElizaOS supporting transfers, swaps, staking, bridging, and token deployments",
     "main": "dist/index.js",
-    "type": "module",
+    "module": "dist/index.js",
     "types": "dist/index.d.ts",
+    "type": "module",
+    "author": "ElizaOS Contributors",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/elizaos/eliza.git",
+        "directory": "packages/plugin-bnb"
+    },
+    "keywords": [
+        "eliza",
+        "elizaos",
+        "plugin",
+        "bnb",
+        "bsc",
+        "opbnb",
+        "blockchain",
+        "defi",
+        "bridge",
+        "swap",
+        "stake"
+    ],
+    "files": [
+        "dist"
+    ],
+    "exports": {
+        "./package.json": "./package.json",
+        ".": {
+            "import": {
+                "types": "./dist/index.d.ts",
+                "default": "./dist/index.js"
+            }
+        }
+    },
+    "publishConfig": {
+        "access": "public"
+    },
     "dependencies": {
         "@bnb-chain/greenfield-js-sdk": "^2.2.0",
-        "@elizaos/core": "workspace:*",
+        "@elizaos/core": "1.0.9",
         "@lifi/data-types": "5.15.5",
         "@lifi/sdk": "3.4.1",
         "@lifi/types": "16.3.0",
-        "@web3-name-sdk/core": "^0.3.2",
         "@openzeppelin/contracts": "^5.1.0",
-        "@types/node": "^22.10.5",
-        "solc": "^0.8.28",
-        "tsup": "8.3.5",
-        "viem": "2.21.53",
-        "ws": "^8.18.0",
+        "@web3-name-sdk/core": "^0.3.2",
         "chalk": "^5.3.0",
         "cli-table3": "^0.6.3",
+        "mime-types": "^2.1.35",
         "ora": "^8.0.1",
-        "mime-types": "^2.1.35"
-
-        
+        "solc": "^0.8.28",
+        "viem": "2.21.53",
+        "ws": "^8.18.0"
     },
     "devDependencies": {
-        "@biomejs/biome": "1.9.4"
+        "@types/bun": "latest",
+        "@types/node": "^22.10.5",
+        "@types/jest": "^29.5.5",
+        "prettier": "^3.3.0",
+        "tsup": "^8.3.5",
+        "typescript": "^5.3.0",
+        "zod": "^3.22.0"
     },
     "scripts": {
-        "build": "tsup --format esm --dts",
-        "dev": "tsup --format esm --dts --watch",
-        "test": "vitest run",
-        "clean": "rm -rf dist",
-        "lint": "biome lint .",
-        "lint:fix": "biome check --apply .",
-        "format": "biome format .",
-        "format:fix": "biome format --write ."
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "test": "bun test",
+        "test:watch": "bun test --watch",
+        "test:coverage": "bun test --coverage",
+        "clean": "rm -rf dist .turbo node_modules .turbo-tsconfig.json tsconfig.tsbuildinfo",
+        "lint": "prettier --write ./src",
+        "format": "prettier --write ./src",
+        "format:check": "prettier --check ./src"
     },
     "peerDependencies": {
         "whatwg-url": "7.1.0",
         "@types/mime-types": "^2.1.4"
     },
     "agentConfig": {
-        "pluginType": "elizaos:client:1.0.0",
+        "pluginType": "elizaos:plugin:1.0.0",
         "pluginParameters": {
             "BNB_PRIVATE_KEY": {
                 "type": "string",
-                "minLength": 1,
                 "description": "Your private key for the BNB Chain ecosystem. Grants full access to associated funds.",
-                "optional": true
+                "required": false,
+                "sensitive": true
             },
             "BNB_PUBLIC_KEY": {
                 "type": "string",
-                "minLength": 1,
                 "description": "Your public key for the BNB Chain ecosystem.",
-                "optional": true
+                "required": false,
+                "sensitive": false
             },
             "BSC_PROVIDER_URL": {
                 "type": "string",
-                "minLength": 1,
                 "description": "Custom RPC URL for BSC.",
-                "optional": true
+                "required": false,
+                "sensitive": false
             },
             "OPBNB_PROVIDER_URL": {
                 "type": "string",
-                "minLength": 1,
                 "description": "Custom RPC URL for opBNB.",
-                "optional": true
+                "required": false,
+                "sensitive": false
             }
         }
     }

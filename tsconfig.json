@@ -1,16 +1,22 @@
 {
-    "extends": "../core/tsconfig.json",
     "compilerOptions": {
         "outDir": "dist",
-        "rootDir": "./src",
-        "typeRoots": [
-            "./node_modules/@types",
-            "./src/types"
-        ],
+        "rootDir": "src",
+        "baseUrl": "./",
+        "lib": ["ESNext"],
+        "target": "ESNext",
+        "module": "Preserve",
+        "moduleResolution": "Bundler",
+        "strict": true,
+        "esModuleInterop": true,
+        "allowImportingTsExtensions": true,
         "declaration": true,
-        "strictNullChecks": true
+        "emitDeclarationOnly": true,
+        "resolveJsonModule": true,
+        "moduleDetection": "force",
+        "allowArbitraryExtensions": true,
+        "skipLibCheck": true,
+        "types": ["bun"]
     },
-    "include": [
-        "src"
-    ]
+    "include": ["src/**/*.ts"]
 }
